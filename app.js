@@ -116,6 +116,61 @@ function load(){
 function persist(){
   db.currentId = currentId;
   localStorage.setItem(KEY, JSON.stringify(db));
+  /* Auto-Backup: bei jeder Aenderung den 3-Min-Timer neu starten */
+  scheduleAutoBackup();
+}
+
+/* === AUTO-BACKUP nach 3 Min Inaktivitaet === */
+let _autoBackupTimer = null;
+let _lastBackupHash = null;       /* Was wurde zuletzt gesichert? */
+let _hasUnsavedChanges = false;   /* Ist die aktuelle DB neuer als das letzte Backup? */
+
+function dataHash(){
+  /* Schneller Hash der DB - reicht um Aenderungen zu erkennen */
+  const s = localStorage.getItem(KEY) || '';
+  let h = 0;
+  for(let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return h;
+}
+
+function scheduleAutoBackup(){
+  /* Wenn deaktiviert: laufenden Timer abbrechen und nicht neu starten */
+  if(!db.settings || !db.settings.autoBackup){
+    clearTimeout(_autoBackupTimer);
+    return;
+  }
+  /* Nur planen, wenn sich was geaendert hat seit letztem Backup */
+  const currentHash = dataHash();
+  if(currentHash === _lastBackupHash) return;
+  _hasUnsavedChanges = true;
+
+  clearTimeout(_autoBackupTimer);
+  _autoBackupTimer = setTimeout(() => {
+    /* Vor dem Schreiben nochmal pruefen, ob immer noch Aenderungen vorliegen
+       UND ob Auto-Backup immer noch aktiviert ist (User koennte zwischenzeitlich deaktiviert haben) */
+    if(_hasUnsavedChanges && db.settings.autoBackup){
+      doAutoBackup();
+    }
+  }, 3 * 60 * 1000); /* 3 Minuten */
+}
+
+function doAutoBackup(){
+  try {
+    const filename = 'weberbrain_backup_' + today() + '.json';
+    const blob = new Blob([JSON.stringify(db, null, 2)], {type:'application/json'});
+    dl(blob, filename);
+    _lastBackupHash = dataHash();
+    _hasUnsavedChanges = false;
+    showToast('💾 Auto-Backup erstellt');
+  } catch(e){
+    console.error('Auto-Backup fehlgeschlagen:', e);
+  }
+}
+
+/* Manuell sofort backupen (z.B. ueber Button) */
+function triggerImmediateBackup(){
+  clearTimeout(_autoBackupTimer);
+  doAutoBackup();
 }
 function ensureSettings(){
   db.settings = db.settings || {};
@@ -127,6 +182,8 @@ function ensureSettings(){
   if(db.settings.praxisContact === undefined) db.settings.praxisContact = '';
   if(!db.settings.pinTherapeut) db.settings.pinTherapeut = '2304';
   if(!db.settings.pinPatient) db.settings.pinPatient = '0000';
+  /* Auto-Backup: Standard AUS - User muss bewusst aktivieren */
+  if(db.settings.autoBackup === undefined) db.settings.autoBackup = false;
 }
 ensureSettings();
 /* Migration: Alte Patienten ohne maintenance-Feld nachruesten */
@@ -136,6 +193,11 @@ db.patients.forEach(p => {
   }
 });
 persist();
+/* Auto-Backup Baseline: aktueller Stand gilt als "schon gesichert", damit
+   Migrations-Aenderungen nicht direkt ein Backup ausloesen */
+_lastBackupHash = dataHash();
+_hasUnsavedChanges = false;
+clearTimeout(_autoBackupTimer);
 
 /* ============================================================
    HELPERS
@@ -1209,9 +1271,24 @@ function renderPanels(){
       <h3>Backup</h3>
       <div class="topBtns">
         <button class="muted" id="importBtn">JSON importieren</button>
-        <button class="muted" id="exportBtn2">Backup exportieren</button>
+        <button class="muted" id="exportBtn2">Backup jetzt exportieren</button>
       </div>
-      <input id="importFile" type="file" accept="application/json" class="hidden">`;
+      <input id="importFile" type="file" accept="application/json" class="hidden">
+
+      <h3>Auto-Backup</h3>
+      <label class="toggleSwitch" style="margin:8px 0">
+        <input type="checkbox" id="autoBackupToggle" ${db.settings.autoBackup?'checked':''}>
+        <span class="slider"></span>
+        <span class="toggleLabel">${db.settings.autoBackup?'aktiviert (3 Min Inaktivität)':'deaktiviert'}</span>
+      </label>
+      <div class="notice">
+        <b>So funktioniert das Auto-Backup:</b><br>
+        Wenn aktiviert, wird 3 Minuten nach der letzten Eingabe automatisch eine Sicherungsdatei in den <i>Downloads</i>-Ordner geschrieben. Pro Tag eine Datei (<code>weberbrain_backup_${today()}.json</code>) – ältere Backups bleiben erhalten, der heutige Tag wird ggf. überschrieben.
+        <br><br>
+        <b>Auf dem Tablet:</b> Beim ersten Mal fragt Chrome, ob mehrere Dateien heruntergeladen werden dürfen – das einmalig erlauben.
+        <br><br>
+        <b>Wichtig:</b> Das ersetzt kein wöchentliches Sichern in die Cloud / auf USB. Es ist eine zusätzliche Absicherung.
+      </div>`;
 
     /* __settings-Werte aus db.settings hydrieren */
     document.querySelector('[data-path="__settings.praxisName"]').value = db.settings.praxisName || '';
@@ -1452,6 +1529,27 @@ function wireDynamic(){
   const eb2 = document.getElementById('exportBtn2');
   if(eb2) eb2.onclick = exportJson;
 
+  /* Auto-Backup Toggle */
+  const abt = document.getElementById('autoBackupToggle');
+  if(abt){
+    abt.onchange = () => {
+      db.settings.autoBackup = abt.checked;
+      persist();
+      if(abt.checked){
+        /* Beim Aktivieren: Baseline neu setzen, damit nicht sofort ein Backup
+           ausgeloest wird wegen der Setting-Aenderung selbst */
+        _lastBackupHash = dataHash();
+        _hasUnsavedChanges = false;
+        clearTimeout(_autoBackupTimer);
+        showToast('Auto-Backup aktiviert');
+      } else {
+        clearTimeout(_autoBackupTimer);
+        showToast('Auto-Backup deaktiviert');
+      }
+      render();
+    };
+  }
+
   const ib = document.getElementById('importBtn');
   if(ib) ib.onclick = () => document.getElementById('importFile').click();
   const iff = document.getElementById('importFile');
@@ -1463,26 +1561,91 @@ function wireDynamic(){
       r.onload = () => {
         try{
           const data = JSON.parse(r.result);
-          if(data.patients){
-            /* MERGE statt OVERWRITE: bestehende Patienten bleiben erhalten */
+
+          /* Format 1: Einzelner Patient mit _type-Marker (neue Variante) */
+          if(data._type === 'single_patient' && data.patient){
+            importSinglePatient(data.patient);
+            return;
+          }
+
+          /* Format 2: Einzelner Patient ohne Marker (alte Form, hat .id und .stamm) */
+          if(data.id && data.stamm){
+            importSinglePatient(data);
+            return;
+          }
+
+          /* Format 3: Volles Backup (mit patients-Array) */
+          if(data.patients && Array.isArray(data.patients)){
             const existingIds = new Set(db.patients.map(x => x.id));
+            let added = 0, skipped = 0;
             data.patients.forEach(np => {
-              if(!existingIds.has(np.id)) db.patients.push(np);
+              if(!existingIds.has(np.id)){
+                /* Maintenance-Feld nachruesten falls fehlt */
+                if(!np.maintenance) np.maintenance = {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
+                db.patients.push(np);
+                added++;
+              } else {
+                skipped++;
+              }
             });
             if(data.settings) db.settings = Object.assign({}, db.settings, data.settings);
-          } else {
-            /* Einzelner Patient */
-            if(!db.patients.find(x => x.id === data.id)) db.patients.push(data);
+            ensureSettings();
+            persist(); applyGlobalSettings(); render();
+            alert(`Backup importiert: ${added} neue Patienten hinzugefügt, ${skipped} bereits vorhanden (unverändert).`);
+            return;
           }
-          ensureSettings();
-          persist(); applyGlobalSettings(); render();
-          alert('Import erfolgreich (Daten zusammengeführt).');
+
+          alert('Import fehlgeschlagen: Datei hat ein unbekanntes Format.');
         }catch(err){
           alert('Import fehlgeschlagen: '+err.message);
         }
       };
       r.readAsText(f);
     };
+  }
+
+  /* Helper: einzelner Patient importieren mit Konflikt-Behandlung */
+  function importSinglePatient(np){
+    /* Maintenance-Feld nachruesten falls fehlt (alte Exporte) */
+    if(!np.maintenance) np.maintenance = {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
+
+    const existing = db.patients.find(x => x.id === np.id);
+    if(existing){
+      const name = np.stamm?.name || 'Unbenannt';
+      const choice = prompt(
+        `Patient "${name}" ist bereits vorhanden.\n\n` +
+        `Was möchtest du tun?\n` +
+        `  1 = Bestehenden Datensatz mit Import-Daten ÜBERSCHREIBEN\n` +
+        `  2 = Als KOPIE hinzufügen (neue ID)\n` +
+        `  3 = Abbrechen`,
+        '2'
+      );
+      if(choice === '1'){
+        /* Ueberschreiben: existing in-place ersetzen */
+        const idx = db.patients.findIndex(x => x.id === np.id);
+        db.patients[idx] = np;
+        persist(); render();
+        alert(`Patient "${name}" wurde überschrieben.`);
+      } else if(choice === '2'){
+        /* Als Kopie: neue ID + Hinweis im Namen */
+        np.id = 'p_'+Date.now();
+        np.stamm = np.stamm || {};
+        np.stamm.name = (np.stamm.name || 'Unbenannt') + ' (Import)';
+        db.patients.push(np);
+        currentId = np.id;
+        persist(); render();
+        alert(`Patient "${name}" wurde als Kopie hinzugefügt.`);
+      } else {
+        /* Abgebrochen */
+        return;
+      }
+    } else {
+      /* Neuer Patient - einfach hinzufuegen */
+      db.patients.push(np);
+      currentId = np.id;
+      persist(); render();
+      alert(`Patient "${np.stamm?.name||'Unbenannt'}" importiert.`);
+    }
   }
 
   const ab = document.getElementById('anonBtn');
@@ -1650,6 +1813,7 @@ function drawChart(){
   const cssH = 520;
   c.width = cssW * dpr; c.height = cssH * dpr;
   const ctx = c.getContext('2d');
+  if(!ctx) return; /* kein 2D-Context (z.B. in Test-Umgebungen) - elegant abbrechen */
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,cssW,cssH);
 
@@ -1687,6 +1851,26 @@ function exportJson(){
   const blob = new Blob([JSON.stringify(db,null,2)], {type:'application/json'});
   dl(blob, 'weberbrain_patienten_backup_'+today()+'.json');
 }
+
+/* Einzelner Patient-Export: enthaelt _type-Marker damit Import-Logik
+   ihn von einem Voll-Backup unterscheiden kann. Filename enthaelt den Namen
+   (sanitisiert), damit die Datei zuordbar ist. */
+function exportSinglePatient(){
+  saveForm();
+  const p = cur();
+  if(!p){ alert('Kein Patient ausgewählt.'); return; }
+  const out = {
+    _type: 'single_patient',
+    _exportedAt: new Date().toISOString(),
+    _appVersion: 'weberbrain-v1-7',
+    patient: p
+  };
+  /* Sanitisiere den Namen fuer den Dateinamen (nur Buchstaben, Zahlen, _) */
+  const safeName = (p.stamm.name || 'patient').replace(/[^a-zA-Z0-9äöüÄÖÜß]/g,'_').slice(0,40);
+  const filename = 'weberbrain_patient_' + safeName + '_' + today() + '.json';
+  dl(new Blob([JSON.stringify(out,null,2)], {type:'application/json'}), filename);
+  showToast('Patient exportiert: ' + filename);
+}
 function exportAnon(){
   saveForm();
   const p = cur();
@@ -1709,12 +1893,38 @@ function dl(blob,name){
   URL.revokeObjectURL(a.href);
 }
 
+/* Patientenbericht drucken: wechselt temporaer auf Auswertung,
+   schaltet Modus 'printing-patient' an (nur Bericht sichtbar),
+   ruft window.print() und stellt danach den vorherigen Tab wieder her */
 function doPrint(){
+  const p = cur();
+  if(!p){ alert('Kein Patient ausgewählt.'); return; }
+  if(userMode === 'patient'){ return; } /* Patient soll nicht drucken */
   saveForm();
+
   /* Druckdatum setzen */
-  const d = new Date();
-  document.getElementById('printDate').textContent = 'Ausdruck: '+d.toLocaleDateString('de-DE')+' '+d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
-  window.print();
+  const dt = new Date();
+  document.getElementById('printDate').textContent = 'Patientenbericht · '+dt.toLocaleDateString('de-DE')+' '+dt.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+
+  const previousTab = activeTab;
+  /* Auf Auswertung wechseln, damit der Bericht sicher im DOM ist */
+  if(activeTab !== 'auswertung'){
+    activeTab = 'auswertung';
+    render();
+  }
+
+  document.body.classList.add('printing-patient');
+  setTimeout(() => {
+    window.print();
+    setTimeout(() => {
+      document.body.classList.remove('printing-patient');
+      /* Zurueck zum vorherigen Tab */
+      if(previousTab && previousTab !== 'auswertung'){
+        activeTab = previousTab;
+        render();
+      }
+    }, 500);
+  }, 100);
 }
 
 /* ============================================================
@@ -1732,6 +1942,7 @@ document.getElementById('newPatientBtn').onclick = () => {
 document.getElementById('saveBtn').onclick = () => { saveForm(); alert('Gespeichert.'); };
 document.getElementById('exportBtn').onclick = exportJson;
 document.getElementById('printBtn').onclick = doPrint;
+document.getElementById('exportSinglePatientBtn').onclick = exportSinglePatient;
 document.getElementById('lockBtn').onclick = () => { saveForm(); showLock(); };
 document.getElementById('deleteBtn').onclick = () => {
   if(!cur()) return;
