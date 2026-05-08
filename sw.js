@@ -1,6 +1,11 @@
 /* WeberBrain Evaluation – Service Worker
-   App-Shell-Caching für Offline-Betrieb */
-const CACHE = 'weberbrain-v1-2';
+   Strategie: Cache-first mit Stale-While-Revalidate (offline-robust)
+   - App startet IMMER instant aus dem Cache (auch ohne Internet)
+   - Im Hintergrund wird auf Updates geprüft (wenn Internet da ist)
+   - Beim NÄCHSTEN Start ist die neue Version aktiv
+   - Robuster als Network-first für eine Praxis-Anwendung */
+
+const CACHE = 'weberbrain-v1-4';
 const ASSETS = [
   './',
   './index.html',
@@ -10,6 +15,7 @@ const ASSETS = [
   './icon.png'
 ];
 
+/* INSTALL: alle App-Dateien beim ersten Besuch cachen */
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE)
@@ -18,6 +24,7 @@ self.addEventListener('install', e => {
   );
 });
 
+/* ACTIVATE: alte Caches aufräumen, sofort übernehmen */
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
@@ -26,37 +33,48 @@ self.addEventListener('activate', e => {
   );
 });
 
-/* Network-first für HTML (immer aktuelle Version),
-   Cache-first für andere Assets. */
+/* FETCH: Stale-While-Revalidate für ALLES
+   - Aus Cache antworten (sofort, auch offline)
+   - Im Hintergrund Update versuchen (für nächsten Start)
+   - Fallback auf index.html für Navigations-Requests, falls nichts im Cache */
 self.addEventListener('fetch', e => {
   const req = e.request;
   if(req.method !== 'GET') return;
 
-  const isHTML = req.mode === 'navigate' ||
-                 (req.headers.get('accept') || '').includes('text/html');
+  /* Externe Requests (z.B. CDNs) werden nicht abgefangen */
+  if(new URL(req.url).origin !== location.origin) return;
 
-  if(isHTML){
-    e.respondWith(
-      fetch(req)
-        .then(res => {
-          const copy = res.clone();
-          caches.open(CACHE).then(c => c.put(req, copy));
-          return res;
-        })
-        .catch(() => caches.match(req).then(r => r || caches.match('./index.html')))
-    );
-  } else {
-    e.respondWith(
-      caches.match(req).then(cached => {
-        if(cached) return cached;
-        return fetch(req).then(res => {
-          if(res.ok && new URL(req.url).origin === location.origin){
-            const copy = res.clone();
-            caches.open(CACHE).then(c => c.put(req, copy));
-          }
-          return res;
-        }).catch(() => cached);
-      })
-    );
-  }
+  e.respondWith(
+    caches.open(CACHE).then(async cache => {
+      const cached = await cache.match(req);
+      const fetchPromise = fetch(req).then(res => {
+        if(res && res.ok){
+          /* Hintergrund-Update: neue Version für nächsten Start cachen */
+          cache.put(req, res.clone());
+        }
+        return res;
+      }).catch(() => null);
+
+      /* Cache-First: wenn vorhanden, sofort zurückgeben */
+      if(cached) return cached;
+
+      /* Sonst: aufs Netzwerk warten */
+      const fresh = await fetchPromise;
+      if(fresh) return fresh;
+
+      /* Letzter Ausweg: index.html als SPA-Fallback (für Navigation) */
+      const isHTML = req.mode === 'navigate' ||
+                     (req.headers.get('accept') || '').includes('text/html');
+      if(isHTML){
+        const indexCached = await cache.match('./index.html');
+        if(indexCached) return indexCached;
+      }
+
+      return new Response('Offline und nicht im Cache', {
+        status: 503,
+        statusText: 'Offline',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+      });
+    })
+  );
 });

@@ -14,6 +14,7 @@ const TABS_ALL = [
   ['planung','Therapieplanung'],
   ['ende','End-Evaluierung'],
   ['auswertung','Auswertung'],
+  ['forschung','Forschungs-Auswertung'],
   ['settings','Einstellungen']
 ];
 const TABS_PATIENT = [
@@ -382,6 +383,534 @@ function sessionHtml(i){
   </div>`;
 }
 
+/* ============================================================
+   FORSCHUNGS-AUSWERTUNG
+   Aggregiert alle Patienten der Kartei nach Diagnose
+   ============================================================ */
+
+/* Mappt das endResult-Auswahlfeld auf einen Score in % */
+function endResultScore(result){
+  if(!result) return null;
+  const map = {
+    'Deutliche Verbesserung': 70,
+    'Leichte Verbesserung': 30,
+    'Keine Veränderung': 0,
+    'Leichte Verschlechterung': -30,
+    'Deutliche Verschlechterung': -70
+  };
+  return map[result] ?? null;
+}
+
+/* Verbesserung eines Patienten in % berechnen - KOMBINIERT
+   - 60% gewichtet: Symptom-Reduktion (vor/nach Mittelwerte der Skalen)
+   - 40% gewichtet: Therapeuten-Einschätzung (endResult-Feld)
+   - Wenn nur eines vorhanden, wird das alleine genutzt
+   - Negativer Wert = Verschlechterung, positiver = Verbesserung
+   - Rueckgabewert: Score (oder null falls beide fehlen) */
+function patientImprovement(p){
+  const pre = symptoms.map(s => p.evaluierung?.values?.[s]).filter(v => v !== '' && v !== undefined && v !== null).map(Number);
+  const post = symptoms.map(s => p.ende?.values?.[s]).filter(v => v !== '' && v !== undefined && v !== null).map(Number);
+
+  let symptomScore = null;
+  if(pre.length >= 3 && post.length >= 3){
+    const avgPre = pre.reduce((a,b)=>a+b,0) / pre.length;
+    const avgPost = post.reduce((a,b)=>a+b,0) / post.length;
+    symptomScore = avgPre === 0 ? 0 : Math.round(((avgPre - avgPost) / avgPre) * 100);
+  }
+
+  const resultScore = endResultScore(p.ende?.result);
+
+  if(symptomScore === null && resultScore === null) return null;
+  if(symptomScore === null) return resultScore;
+  if(resultScore === null) return symptomScore;
+  /* Gewichteter Mittelwert: 60% Symptom-Reduktion + 40% Therapeuten-Einschätzung */
+  return Math.round(symptomScore * 0.6 + resultScore * 0.4);
+}
+
+/* Mittelwert der durchgefuehrten Sitzungs-Parameter eines Patienten */
+function patientSessionStats(p){
+  const sessions = (p.planung?.sessions || []).filter(s => s.hz !== '' && s.hz !== undefined);
+  if(!sessions.length) return null;
+  const num = arr => arr.map(Number).filter(x => !isNaN(x));
+  const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : null;
+  /* Hz: bei Mehrfach-Eintraegen wie "10 / 40" oder "40 + 10" nehmen wir den ersten */
+  const hzVals = num(sessions.map(s => String(s.hz).split(/[\/+,\s]/)[0]));
+  const intVals = num(sessions.map(s => String(s.intensity).split(/[\/+,–-]/)[0]));
+  const durVals = num(sessions.map(s => String(s.duration).split(/[\/+,–-]/)[0]));
+  return {
+    nSessions: sessions.length,
+    avgHz: avg(hzVals),
+    avgIntensity: avg(intVals),
+    avgDuration: avg(durVals)
+  };
+}
+
+/* Alters-Berechnung aus Geburtsdatum */
+function patientAge(p){
+  if(!p.stamm?.birth) return null;
+  const b = new Date(p.stamm.birth);
+  if(isNaN(b)) return null;
+  const now = new Date();
+  let age = now.getFullYear() - b.getFullYear();
+  if(now.getMonth() < b.getMonth() || (now.getMonth() === b.getMonth() && now.getDate() < b.getDate())) age--;
+  return age;
+}
+function ageGroup(age){
+  if(age === null) return '?';
+  if(age < 30) return '<30';
+  if(age < 50) return '30-49';
+  if(age < 70) return '50-69';
+  return '70+';
+}
+function genderNorm(g){
+  if(!g) return '?';
+  const s = String(g).toLowerCase().trim();
+  if(s.startsWith('w') || s.startsWith('f')) return 'weiblich';
+  if(s.startsWith('m')) return 'männlich';
+  if(s.startsWith('d') || s.startsWith('div') || s === 'x') return 'divers';
+  return '?';
+}
+
+/* Alle Patienten mit ihren berechneten Werten, gefiltert auf "abgeschlossen" */
+function buildAnalysisDataset(){
+  return db.patients
+    .map(p => {
+      const imp = patientImprovement(p);
+      const ses = patientSessionStats(p);
+      if(imp === null || ses === null) return null;
+      return {
+        id: p.id,
+        diagnoses: p.anamnese?.diagnoses || [],
+        improvement: imp,
+        sessions: ses.nSessions,
+        avgHz: ses.avgHz,
+        avgIntensity: ses.avgIntensity,
+        avgDuration: ses.avgDuration,
+        plannedTotal: Number(p.planung?.total) || 0,
+        endResult: p.ende?.result || '',
+        age: patientAge(p),
+        ageGroup: ageGroup(patientAge(p)),
+        gender: genderNorm(p.stamm?.gender),
+        photos: p.planung?.photos || [],
+        supplements: p.planung?.supplements || []
+      };
+    })
+    .filter(Boolean);
+}
+
+/* Welche Diagnosen kommen wie oft vor (in Patienten mit auswertbaren Daten)? */
+function diagnosisCounts(dataset){
+  const counts = {};
+  dataset.forEach(d => {
+    d.diagnoses.forEach(diag => {
+      counts[diag] = (counts[diag] || 0) + 1;
+    });
+  });
+  return counts;
+}
+
+/* Filter Dataset auf eine bestimmte Diagnose */
+function filterByDiagnosis(dataset, diag){
+  return dataset.filter(d => d.diagnoses.includes(diag));
+}
+
+/* Median, Mittelwert, Stdabweichung */
+function stats(values){
+  values = values.filter(v => v !== null && !isNaN(v));
+  if(!values.length) return null;
+  const sorted = [...values].sort((a,b) => a-b);
+  const mean = values.reduce((a,b) => a+b, 0) / values.length;
+  const median = sorted.length % 2 ? sorted[(sorted.length-1)/2] : (sorted[sorted.length/2-1] + sorted[sorted.length/2]) / 2;
+  const variance = values.reduce((a,b) => a + (b-mean)**2, 0) / values.length;
+  const sd = Math.sqrt(variance);
+  return {n: values.length, mean, median, sd, min: sorted[0], max: sorted[sorted.length-1]};
+}
+
+/* Pearson-Korrelation zwischen Parameter X und Verbesserung */
+function pearsonCorrelation(xs, ys){
+  const n = xs.length;
+  if(n < 3) return null;
+  const meanX = xs.reduce((a,b) => a+b, 0) / n;
+  const meanY = ys.reduce((a,b) => a+b, 0) / n;
+  let num = 0, denX = 0, denY = 0;
+  for(let i = 0; i < n; i++){
+    const dx = xs[i] - meanX, dy = ys[i] - meanY;
+    num += dx*dy; denX += dx*dx; denY += dy*dy;
+  }
+  if(denX === 0 || denY === 0) return null;
+  return num / Math.sqrt(denX * denY);
+}
+
+/* Optimaler Parameter-Wert: Bin-Analyse - bei welchem Bin ist die durchschnittliche Verbesserung am hoechsten? */
+function findOptimum(dataset, key, bins){
+  const grouped = {};
+  bins.forEach(b => grouped[b.label] = []);
+  dataset.forEach(d => {
+    const v = d[key];
+    if(v === null || isNaN(v)) return;
+    const bin = bins.find(b => v >= b.min && v < b.max);
+    if(bin) grouped[bin.label].push(d.improvement);
+  });
+  const result = Object.entries(grouped)
+    .map(([label, imps]) => ({
+      label,
+      n: imps.length,
+      meanImprovement: imps.length ? imps.reduce((a,b) => a+b, 0) / imps.length : null
+    }))
+    .filter(x => x.n > 0);
+  return result;
+}
+
+/* === ZENTRALE BIN-DEFINITIONEN ===
+   Hier kannst du die Auswertungs-Stufen aenderen, sie werden ueberall verwendet.
+   - HZ_BINS: jeder 10er-Schritt von 0 bis 100 Hz
+   - INT_BINS: 25% / 50% / 75% / 100% (Intensitaets-Stufen am WeberBrain-Geraet)
+   - DUR_BINS: 10 / 20 / 30 min (Standard-Sitzungsdauern)
+   - SES_BINS: <5 / 5-9 / 10-19 / >=20 Sitzungen (bleibt wie zuvor)
+   max ist EXKLUSIV (avgHz < max), deshalb 10.001 etc. */
+const HZ_BINS = [
+  {label:'0 Hz (CW)', min:0,    max:0.5},
+  {label:'1-10 Hz',   min:0.5,  max:10.5},
+  {label:'11-20 Hz',  min:10.5, max:20.5},
+  {label:'21-30 Hz',  min:20.5, max:30.5},
+  {label:'31-40 Hz',  min:30.5, max:40.5},
+  {label:'41-50 Hz',  min:40.5, max:50.5},
+  {label:'51-60 Hz',  min:50.5, max:60.5},
+  {label:'61-70 Hz',  min:60.5, max:70.5},
+  {label:'71-80 Hz',  min:70.5, max:80.5},
+  {label:'81-90 Hz',  min:80.5, max:90.5},
+  {label:'91-100 Hz', min:90.5, max:1000}
+];
+const INT_BINS = [
+  {label:'25%',  min:0,    max:37.5},
+  {label:'50%',  min:37.5, max:62.5},
+  {label:'75%',  min:62.5, max:87.5},
+  {label:'100%', min:87.5, max:200}
+];
+const DUR_BINS = [
+  {label:'10 min', min:0,  max:15},
+  {label:'20 min', min:15, max:25},
+  {label:'30 min', min:25, max:200}
+];
+const SES_BINS = [
+  {label:'<5',    min:0,  max:5},
+  {label:'5-9',   min:5,  max:10},
+  {label:'10-19', min:10, max:20},
+  {label:'≥20',   min:20, max:200}
+];
+
+/* Heatmap: Frequenz-Bins x Intensitaets-Bins, Wert = mittlere Verbesserung */
+function buildHeatmap(dataset){
+  const hzBins = HZ_BINS;
+  const intBins = INT_BINS;
+  const cells = [];
+  hzBins.forEach((hz, hi) => {
+    intBins.forEach((it, ii) => {
+      const matching = dataset.filter(d =>
+        d.avgHz !== null && d.avgIntensity !== null &&
+        d.avgHz >= hz.min && d.avgHz < hz.max &&
+        d.avgIntensity >= it.min && d.avgIntensity < it.max
+      );
+      const imps = matching.map(d => d.improvement);
+      cells.push({
+        row: hi, col: ii, hzLabel: hz.label, intLabel: it.label,
+        n: matching.length,
+        meanImprovement: imps.length ? Math.round(imps.reduce((a,b) => a+b, 0) / imps.length) : null
+      });
+    });
+  });
+  return {hzBins, intBins, cells};
+}
+
+/* Farbe fuer Heatmap-Zelle (rot = verschlechtert, grau = unveraendert, gruen = verbessert) */
+function heatColor(imp, n){
+  if(imp === null || n === 0) return '#e5e5e5';
+  if(n < 2) return '#c2c0bd'; /* zu wenige Daten */
+  /* Skala: -50% (rot) bis +50% (gruen) */
+  const clamped = Math.max(-50, Math.min(50, imp));
+  if(clamped > 0){
+    /* gruen: 0 -> hellgruen, 50 -> dunkelgruen */
+    const t = clamped / 50;
+    const r = Math.round(180 - 180*t), g = Math.round(220 - 80*t), b = Math.round(180 - 130*t);
+    return `rgb(${r},${g},${b})`;
+  } else if(clamped < 0){
+    const t = -clamped / 50;
+    const r = Math.round(220 - 40*t), g = Math.round(180 - 140*t), b = Math.round(180 - 140*t);
+    return `rgb(${r},${g},${b})`;
+  } else {
+    return '#9ca3af';
+  }
+}
+
+/* Subgruppen-Analyse: Verbesserung nach Geschlecht / Altersgruppe */
+function subgroupAnalysis(dataset){
+  const byGender = {};
+  const byAge = {};
+  dataset.forEach(d => {
+    byGender[d.gender] = byGender[d.gender] || [];
+    byGender[d.gender].push(d.improvement);
+    byAge[d.ageGroup] = byAge[d.ageGroup] || [];
+    byAge[d.ageGroup].push(d.improvement);
+  });
+  const summarize = obj => Object.entries(obj).map(([k, vals]) => ({
+    label: k, n: vals.length,
+    mean: vals.length ? Math.round(vals.reduce((a,b)=>a+b,0) / vals.length) : null
+  })).sort((a,b) => b.n - a.n);
+  return {gender: summarize(byGender), age: summarize(byAge)};
+}
+
+/* === RENDER === */
+let researchSelectedDiag = null;
+
+function renderResearchPanel(){
+  const dataset = buildAnalysisDataset();
+  const total = db.patients.length;
+  const evaluable = dataset.length;
+  const counts = diagnosisCounts(dataset);
+  const sortedDiags = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+
+  let html = `<h2>📊 Forschungs-Auswertung</h2>
+    <p class="smallMuted">Aggregierte Analyse über alle Patienten der Kartei. Ein Patient gilt als "auswertbar", wenn er mindestens 3 Beschwerde-Werte vor und nach Therapie sowie mindestens eine durchgeführte Sitzung hat.</p>
+    <div class="researchGrid">
+      <div class="statCard"><div class="lbl">Patienten gesamt</div><div class="num">${total}</div></div>
+      <div class="statCard"><div class="lbl">Auswertbar</div><div class="num">${evaluable}</div><div class="sub">${total ? Math.round(evaluable/total*100) : 0}% der Kartei</div></div>
+      <div class="statCard"><div class="lbl">Diagnosen erfasst</div><div class="num">${sortedDiags.length}</div></div>
+    </div>`;
+
+  if(evaluable < 1){
+    html += `<div class="researchWarn">⚠️ Noch keine auswertbaren Patientendaten. Patienten benötigen entweder Vor-/Nach-Evaluierung mit mindestens 3 Beschwerde-Skalen <i>oder</i> ein ausgefülltes End-Ergebnis-Feld – plus mindestens eine durchgeführte Sitzung mit Hz-Wert.</div>`;
+    document.querySelector('[data-panel="forschung"]').innerHTML = html;
+    return;
+  }
+
+  /* Diagnose-Auswahl */
+  if(!researchSelectedDiag || !counts[researchSelectedDiag]){
+    researchSelectedDiag = sortedDiags[0]?.[0] || null;
+  }
+
+  html += `<h3>Diagnose wählen</h3>
+    <div class="diagSelector">
+      ${sortedDiags.map(([d,n]) => `<span class="chip ${d===researchSelectedDiag?'active':''}" data-diag="${esc(d)}">${esc(d)} <small>(${n})</small></span>`).join('')}
+    </div>`;
+
+  if(researchSelectedDiag){
+    const sub = filterByDiagnosis(dataset, researchSelectedDiag);
+    html += renderDiagnosisAnalysis(researchSelectedDiag, sub, dataset);
+  }
+
+  html += `<div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap" class="no-print">
+    <button class="primary" id="printResearchBtn">🖨️ Auswertung drucken</button>
+    <button class="muted" id="exportResearchCSV">CSV-Export (anonymisiert)</button>
+    <button class="muted" id="exportResearchJSON">JSON-Export (anonymisiert)</button>
+  </div>`;
+
+  document.querySelector('[data-panel="forschung"]').innerHTML = html;
+
+  /* Diagnose-Wechsel */
+  document.querySelectorAll('.diagSelector .chip').forEach(c => {
+    c.onclick = () => {
+      researchSelectedDiag = c.dataset.diag;
+      renderResearchPanel();
+    };
+  });
+  /* Exporte */
+  const csvBtn = document.getElementById('exportResearchCSV');
+  if(csvBtn) csvBtn.onclick = () => exportResearchCSV(dataset);
+  const jsonBtn = document.getElementById('exportResearchJSON');
+  if(jsonBtn) jsonBtn.onclick = () => exportResearchJSON(dataset);
+  const printResBtn = document.getElementById('printResearchBtn');
+  if(printResBtn) printResBtn.onclick = () => doResearchPrint();
+}
+
+/* Forschungs-Auswertung drucken: setzt einen speziellen Body-Modus,
+   damit nur das Forschungs-Panel gedruckt wird (mit Forschungs-Briefkopf) */
+function doResearchPrint(){
+  const dt = new Date();
+  document.getElementById('printDate').textContent = 'Forschungs-Auswertung · '+dt.toLocaleDateString('de-DE')+' '+dt.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
+  document.body.classList.add('printing-research');
+  setTimeout(() => {
+    window.print();
+    setTimeout(() => document.body.classList.remove('printing-research'), 500);
+  }, 50);
+}
+
+function renderDiagnosisAnalysis(diag, sub, allDataset){
+  if(sub.length < 1){
+    return `<div class="researchWarn">⚠️ Keine auswertbaren Patient(en) mit dieser Diagnose.</div>`;
+  }
+
+  const impStats = stats(sub.map(d => d.improvement));
+  const sesStats = stats(sub.map(d => d.sessions));
+  const hzStats = stats(sub.map(d => d.avgHz));
+  const intStats = stats(sub.map(d => d.avgIntensity));
+  const durStats = stats(sub.map(d => d.avgDuration));
+
+  const successRate = Math.round(sub.filter(d => d.improvement > 10).length / sub.length * 100);
+  const noChangeRate = Math.round(sub.filter(d => Math.abs(d.improvement) <= 10).length / sub.length * 100);
+  const worseRate = Math.round(sub.filter(d => d.improvement < -10).length / sub.length * 100);
+
+  let html = `<h3>Diagnose: ${esc(diag)} – ${sub.length} Patient${sub.length===1?'':'en'}</h3>`;
+
+  /* Gestaffelte Warnungen je nach Patientenanzahl */
+  if(sub.length < 3){
+    html += `<div class="researchWarn">⚠️ <b>Nur ${sub.length} Patient${sub.length===1?'':'en'} mit dieser Diagnose.</b> Die folgenden Werte sind reine Einzelfall-Beobachtungen und nicht aussagekräftig. Erst ab 3 Patienten werden statistische Auswertungen sinnvoll.</div>`;
+  } else if(sub.length < 10){
+    html += `<div class="researchWarn">ℹ️ <b>Explorativ (${sub.length} Patienten):</b> Werte sind richtungweisend, aber statistisch nicht belastbar. Ab ca. 10 Patienten werden Trends robuster, ab 30 wissenschaftlich verwertbar.</div>`;
+  }
+
+  html += `<div class="researchGrid">
+    <div class="statCard"><div class="lbl">Mittlere Verbesserung</div><div class="num" style="color:${impStats.mean>10?'#007a53':impStats.mean<-10?'#b42a2a':'#6b7280'}">${impStats.mean>0?'+':''}${Math.round(impStats.mean)}%</div><div class="sub">Median ${Math.round(impStats.median)}% · SD ${Math.round(impStats.sd)}%</div></div>
+    <div class="statCard"><div class="lbl">Erfolgsquote (>10% Verbesserung)</div><div class="num" style="color:#007a53">${successRate}%</div><div class="sub">unverändert ${noChangeRate}% · schlechter ${worseRate}%</div></div>
+    <div class="statCard"><div class="lbl">Ø Sitzungen</div><div class="num">${Math.round(sesStats.mean)}</div><div class="sub">${sesStats.min}–${sesStats.max} Sitzungen</div></div>
+  </div>`;
+
+  /* Optimale Parameter */
+  html += `<h3>Statistisch optimale Parameter</h3>
+    <p class="smallMuted">Pro Bin wird die mittlere Verbesserung berechnet. Höhere Werte = besser.</p>`;
+
+  /* Optimale Parameter - alle Bins aus zentralen Konstanten oben */
+  const hzOpt  = findOptimum(sub, 'avgHz',         HZ_BINS);
+  const intOpt = findOptimum(sub, 'avgIntensity',  INT_BINS);
+  const durOpt = findOptimum(sub, 'avgDuration',   DUR_BINS);
+  const sesOpt = findOptimum(sub, 'sessions',      SES_BINS);
+
+  html += renderOptimumTable('Frequenz (Hz)', hzOpt);
+  html += renderOptimumTable('Intensität (%)', intOpt);
+  html += renderOptimumTable('Sitzungsdauer (min)', durOpt);
+  html += renderOptimumTable('Anzahl Sitzungen', sesOpt);
+
+  /* Heatmap */
+  html += `<h3>Heatmap: Frequenz × Intensität</h3>
+    <p class="smallMuted">Zellen-Farbe = mittlere Verbesserung. Grün = besser, Rot = schlechter, Grau = unverändert oder zu wenige Daten. Zahl in Klammern = Anzahl Patienten in dieser Zelle.</p>`;
+  const hm = buildHeatmap(sub);
+  html += renderHeatmap(hm);
+
+  /* Korrelationen */
+  const hzCorr = pearsonCorrelation(sub.map(d => d.avgHz), sub.map(d => d.improvement));
+  const intCorr = pearsonCorrelation(sub.map(d => d.avgIntensity), sub.map(d => d.improvement));
+  const durCorr = pearsonCorrelation(sub.map(d => d.avgDuration), sub.map(d => d.improvement));
+  const sesCorr = pearsonCorrelation(sub.map(d => d.sessions), sub.map(d => d.improvement));
+
+  html += `<h3>Korrelationen mit Verbesserung</h3>
+    <p class="smallMuted">Pearson r: -1 = stark negativ, 0 = kein Zusammenhang, +1 = stark positiv. Interpretation: |r| > 0.3 deutet auf einen schwachen, > 0.5 auf einen mittleren, > 0.7 auf einen starken Zusammenhang.</p>
+    <table class="researchTable">
+      <thead><tr><th>Parameter</th><th class="num">r</th><th>Interpretation</th></tr></thead>
+      <tbody>
+        ${corrRow('Frequenz (Hz)', hzCorr)}
+        ${corrRow('Intensität (%)', intCorr)}
+        ${corrRow('Sitzungsdauer (min)', durCorr)}
+        ${corrRow('Anzahl Sitzungen', sesCorr)}
+      </tbody>
+    </table>`;
+
+  /* Subgruppen */
+  const subg = subgroupAnalysis(sub);
+  html += `<h3>Subgruppen-Analyse</h3>
+    <div class="grid">
+      <div>
+        <h4 style="margin-bottom:6px">Nach Geschlecht</h4>
+        <table class="researchTable">
+          <thead><tr><th>Gruppe</th><th class="num">n</th><th class="num">Ø Verbesserung</th></tr></thead>
+          <tbody>${subg.gender.map(g => `<tr><td>${esc(g.label)}</td><td class="num">${g.n}</td><td class="num" style="color:${g.mean>10?'#007a53':g.mean<-10?'#b42a2a':'#6b7280'}">${g.mean>0?'+':''}${g.mean}%</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <div>
+        <h4 style="margin-bottom:6px">Nach Altersgruppe</h4>
+        <table class="researchTable">
+          <thead><tr><th>Gruppe</th><th class="num">n</th><th class="num">Ø Verbesserung</th></tr></thead>
+          <tbody>${subg.age.map(g => `<tr><td>${esc(g.label)}</td><td class="num">${g.n}</td><td class="num" style="color:${g.mean>10?'#007a53':g.mean<-10?'#b42a2a':'#6b7280'}">${g.mean>0?'+':''}${g.mean}%</td></tr>`).join('')}</tbody>
+        </table>
+      </div>
+    </div>
+    <div class="researchWarn">⚠️ <b>Wichtige Hinweise:</b><br>
+      • Korrelation ist keine Kausalität. Beobachtete Zusammenhänge können auch durch andere Faktoren erklärt werden.<br>
+      • Patientenanzahl pro Zelle/Gruppe muss mitberücksichtigt werden — bei n &lt; 5 sind Werte nicht aussagekräftig.<br>
+      • Wenn alle Patienten dasselbe Protokoll bekommen, kann keine Optimierung gefunden werden — bewusst variieren.<br>
+      • Diese Auswertung ersetzt keine kontrollierte Studie, sondern dient als Hypothesen-Generator für die eigene Praxis.</div>`;
+
+  return html;
+}
+
+function renderOptimumTable(title, opt){
+  if(!opt.length) return '';
+  const best = opt.reduce((a,b) => (b.meanImprovement ?? -999) > (a.meanImprovement ?? -999) ? b : a);
+  return `<table class="researchTable">
+    <thead><tr><th>${esc(title)}</th><th class="num">n</th><th class="num">Ø Verbesserung</th></tr></thead>
+    <tbody>
+      ${opt.map(o => `<tr style="${o===best?'background:#e5f6ed;font-weight:700':''}"><td>${esc(o.label)}${o===best?' ⭐':''}</td><td class="num">${o.n}</td><td class="num" style="color:${o.meanImprovement>10?'#007a53':o.meanImprovement<-10?'#b42a2a':'#6b7280'}">${o.meanImprovement>0?'+':''}${Math.round(o.meanImprovement)}%</td></tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+function renderHeatmap(hm){
+  /* Grid: 1 Header-Spalte + intBins.length Spalten */
+  const cols = 1 + hm.intBins.length;
+  let html = `<div class="heatmap" style="grid-template-columns:120px repeat(${hm.intBins.length},1fr)">`;
+  /* Kopfzeile */
+  html += `<div></div>`;
+  hm.intBins.forEach(b => html += `<div class="heatHeader">${esc(b.label)}</div>`);
+  /* Daten-Zeilen */
+  hm.hzBins.forEach((hz, hi) => {
+    html += `<div class="heatRowLabel">${esc(hz.label)}</div>`;
+    hm.intBins.forEach((it, ii) => {
+      const cell = hm.cells.find(c => c.row === hi && c.col === ii);
+      const color = heatColor(cell.meanImprovement, cell.n);
+      const txtColor = (cell.n < 2 || cell.meanImprovement === null) ? '#666' : '#fff';
+      html += `<div class="heatCell" style="background:${color};color:${txtColor}">
+        ${cell.meanImprovement !== null ? (cell.meanImprovement > 0 ? '+' : '') + cell.meanImprovement + '%' : '–'}
+        <span class="n">n=${cell.n}</span>
+      </div>`;
+    });
+  });
+  html += `</div>`;
+  return html;
+}
+
+function corrRow(name, r){
+  if(r === null) return `<tr><td>${esc(name)}</td><td class="num">–</td><td>zu wenige Daten</td></tr>`;
+  const abs = Math.abs(r);
+  let interp;
+  if(abs < 0.1) interp = 'kein Zusammenhang';
+  else if(abs < 0.3) interp = 'sehr schwach';
+  else if(abs < 0.5) interp = 'schwach';
+  else if(abs < 0.7) interp = 'mittel';
+  else interp = 'stark';
+  if(r > 0.1) interp += ' positiv (höher = bessere Verbesserung)';
+  else if(r < -0.1) interp += ' negativ (höher = schlechtere Verbesserung)';
+  return `<tr><td>${esc(name)}</td><td class="num">${r.toFixed(2)}</td><td>${interp}</td></tr>`;
+}
+
+function exportResearchCSV(dataset){
+  const headers = ['id_anon','diagnoses','age','ageGroup','gender','sessions','avgHz','avgIntensity','avgDuration','plannedTotal','endResult','improvementPercent'];
+  const rows = dataset.map((d, i) => [
+    'P'+(i+1).toString().padStart(4,'0'),
+    '"'+d.diagnoses.join('; ')+'"',
+    d.age ?? '',
+    d.ageGroup,
+    d.gender,
+    d.sessions,
+    d.avgHz !== null ? d.avgHz.toFixed(1) : '',
+    d.avgIntensity !== null ? d.avgIntensity.toFixed(1) : '',
+    d.avgDuration !== null ? d.avgDuration.toFixed(1) : '',
+    d.plannedTotal,
+    '"'+d.endResult+'"',
+    d.improvement
+  ].join(','));
+  const csv = headers.join(',') + '\n' + rows.join('\n');
+  dl(new Blob([csv], {type:'text/csv;charset=utf-8'}), 'weberbrain_forschung_'+today()+'.csv');
+}
+
+function exportResearchJSON(dataset){
+  const anon = dataset.map((d,i) => ({...d, id: 'P'+(i+1).toString().padStart(4,'0')}));
+  dl(new Blob([JSON.stringify({exported: new Date().toISOString(), patients: anon}, null, 2)], {type:'application/json'}), 'weberbrain_forschung_'+today()+'.json');
+}
+
+/* ============================================================
+   ENDE FORSCHUNGS-AUSWERTUNG
+   ============================================================ */
+
+
+
 /* ---------- PANELS ---------- */
 function q(panel){ return document.querySelector('[data-panel="'+panel+'"]'); }
 
@@ -500,6 +1029,7 @@ function renderPanels(){
 
   wireDynamic();
   if(activeTab === 'auswertung') drawChart();
+  if(activeTab === 'forschung') renderResearchPanel();
 }
 
 /* ============================================================

@@ -87,6 +87,29 @@ canvas{width:100%;max-height:360px}
 .chartNote{font-size:14px;opacity:.85;margin:8px 0}
 .smallMuted{font-size:13px;opacity:.8}
 
+/* === FORSCHUNGS-AUSWERTUNG === */
+.researchGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:12px 0}
+.statCard{background:var(--muted);border:1px solid var(--line);border-radius:14px;padding:14px}
+.statCard .num{font-size:28px;font-weight:900;color:var(--brand)}
+.statCard .lbl{font-size:12px;text-transform:uppercase;letter-spacing:.05em;opacity:.75;font-weight:700}
+.statCard .sub{font-size:13px;opacity:.7;margin-top:4px}
+
+.heatmap{display:grid;gap:2px;margin:14px 0;font-size:12px}
+.heatCell{padding:10px 6px;text-align:center;border-radius:6px;font-weight:700;color:#fff;min-height:42px;display:flex;align-items:center;justify-content:center;flex-direction:column;line-height:1.1}
+.heatCell .n{font-size:10px;opacity:.85;font-weight:500}
+.heatHeader{padding:6px;font-weight:800;font-size:11px;text-align:center;background:var(--muted);border-radius:6px}
+.heatRowLabel{padding:6px 8px;font-weight:800;font-size:11px;text-align:right;display:flex;align-items:center;justify-content:flex-end;background:var(--muted);border-radius:6px}
+
+.diagSelector{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.diagSelector .chip{cursor:pointer}
+.diagSelector .chip.active{background:var(--brand);color:#fff;border-color:var(--brand)}
+
+.researchWarn{background:#fff8dd;border:1px solid #e1c46a;border-radius:10px;padding:10px;font-size:13px;margin:10px 0}
+.researchTable{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}
+.researchTable th,.researchTable td{border-bottom:1px solid var(--line);padding:8px;text-align:left}
+.researchTable th{background:var(--muted)}
+.researchTable td.num{text-align:right;font-variant-numeric:tabular-nums}
+
 /* === LOGIN-OVERLAY === */
 .lockOverlay{position:fixed;inset:0;background:linear-gradient(135deg,#795044,#b08968);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px}
 .lockBox{background:#fff;border-radius:24px;padding:32px;max-width:420px;width:100%;box-shadow:0 20px 60px #0006;text-align:center}
@@ -127,6 +150,42 @@ canvas{width:100%;max-height:360px}
   .evalTable th{background:#f0e6dd}
   .scale label,.chip,.sleepDuration label{border:1px solid #999!important;background:#fff!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .scale label:has(input:checked),.sleepDuration label:has(input:checked){background:#795044!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+  /* === FORSCHUNGS-AUSWERTUNG: nur dieses Panel drucken === */
+  body.printing-research [data-panel]:not([data-panel="forschung"]){display:none!important}
+  body.printing-research [data-panel="forschung"]{display:block!important}
+
+  /* Allgemein fuer alle Auswertungs-Drucke: Heatmap-Farben erhalten */
+  .heatmap,.heatCell,.statCard{
+    -webkit-print-color-adjust:exact!important;
+    print-color-adjust:exact!important;
+  }
+  .heatmap{page-break-inside:avoid;font-size:10px}
+  .heatCell{min-height:32px;padding:6px 4px;font-size:10px}
+  .heatCell .n{font-size:9px}
+
+  /* Forschungs-Tabellen */
+  .researchTable{page-break-inside:avoid;margin:8px 0;font-size:11px}
+  .researchTable th{background:#f0e6dd;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .researchGrid{page-break-inside:avoid}
+  .statCard{background:#f7f3ef!important;border:1px solid #c8b8ad!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .statCard .num{color:#795044!important}
+
+  /* Warnboxen behalten ihre Farbe */
+  .researchWarn{background:#fff8dd!important;border:1px solid #d4a73b!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+  /* Diagnose-Selector: aktive Diagnose hervorheben, Rest dezent */
+  .diagSelector .chip{display:none}
+  .diagSelector .chip.active{display:inline-block;background:#795044!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+
+  /* Hintergrundfarben in Optimum-Tabellen erhalten (best-Markierung) */
+  .researchTable tr[style*="background"]{
+    -webkit-print-color-adjust:exact!important;
+    print-color-adjust:exact!important;
+  }
+
+  /* Page-breaks an sinnvollen Stellen */
+  h3{page-break-before:auto;page-break-after:avoid}
 }
 .printHeader{display:none}
 </style>
@@ -206,6 +265,7 @@ canvas{width:100%;max-height:360px}
       <section data-panel="planung" class="hidden"></section>
       <section data-panel="ende" class="hidden"></section>
       <section data-panel="auswertung" class="hidden"></section>
+      <section data-panel="forschung" class="hidden"></section>
       <section data-panel="settings" class="hidden"></section>
     </div>
   </main>
