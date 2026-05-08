@@ -185,13 +185,14 @@ function ensureShape(){
   p.ende.mood = p.ende.mood || [];
   p.ende.vegetative = p.ende.vegetative || [];
   p.planung = p.planung || {};
-  p.planung.total = p.planung.total || 20;
+  /* Default 20 nur, wenn Feld komplett fehlt - sonst Wert beibehalten (auch leer/0) */
+  if(p.planung.total === undefined || p.planung.total === null) p.planung.total = 20;
   p.planung.sessions = p.planung.sessions || makeSessions(p.planung.total);
   /* Erhaltungstherapie nachruesten fuer alte Patienten */
   p.maintenance = p.maintenance || {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
   if(p.maintenance.enabled === undefined) p.maintenance.enabled = false;
-  if(!p.maintenance.frequencyPerWeek) p.maintenance.frequencyPerWeek = 1;
-  if(!p.maintenance.durationWeeks) p.maintenance.durationWeeks = 12;
+  if(p.maintenance.frequencyPerWeek === undefined || p.maintenance.frequencyPerWeek === null) p.maintenance.frequencyPerWeek = 1;
+  if(p.maintenance.durationWeeks === undefined || p.maintenance.durationWeeks === null) p.maintenance.durationWeeks = 12;
   if(!Array.isArray(p.maintenance.sessions)) p.maintenance.sessions = [];
   adjustSessions();
 }
@@ -1300,7 +1301,14 @@ function wireDynamic(){
     if(el.closest('#lockOverlay')) return; /* PIN-Pad nicht hier verkabeln */
     el.addEventListener('change', () => {
       saveForm();
-      if(el.dataset.path === 'planung.total') render();
+      /* Felder, die strukturell etwas ändern (Sitzungs-Anzahl), brauchen ein render()
+         NACH dem 'change'-Event - nie waehrend des Tippens (input-Event), sonst
+         zerstoert das Re-Render das Eingabefeld und der Cursor springt weg. */
+      if(el.dataset.path === 'planung.total'){
+        adjustSessions();
+        persist();
+        render();
+      }
       if(el.dataset.path === 'maintenance.frequencyPerWeek' || el.dataset.path === 'maintenance.durationWeeks'){
         const p = cur();
         if(p && p.maintenance){
@@ -1315,12 +1323,6 @@ function wireDynamic(){
         }
       }
     });
-    if(el.dataset.path === 'planung.total'){
-      el.addEventListener('input', () => {
-        set('planung.total', el.value);
-        adjustSessions(); persist(); render();
-      });
-    }
   });
 
   const ap = document.getElementById('applyProtocol');
