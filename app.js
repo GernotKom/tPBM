@@ -53,6 +53,37 @@ const protocols = {
   'Epilepsie':{name:'Epilepsie',stages:[['1–3','','','','Nur nach ärztlicher Rücksprache; Photosensitivität beachten'],['4–10','','','','Keine automatische Empfehlung'],['11+','','','','Individuelle ärztliche Verordnung erforderlich']]}
 };
 
+/* === ERHALTUNGS-PROTOKOLLE (Weber Protocol Book 2025) ===
+   Pro Diagnose: Empfehlung für Frequenz pro Woche und Gesamtdauer.
+   Bei dauerhaften Erhaltungstherapien (Demenz, Parkinson) werden 52 Wochen
+   als Default genommen, kann beliebig erhoeht/erneuert werden.
+   note erscheint im UI als Begruendungstext fuer die Empfehlung. */
+const maintenanceProtocols = {
+  'Alzheimer / Demenz':         {freq:2, weeks:52, note:'Neurodegenerativ – glymphatische Clearance braucht kontinuierliche Stimulation. Dauerhaft 1–2×/Woche, kein Absetzen empfohlen.'},
+  'Parkinson':                  {freq:2, weeks:52, note:'Neurodegenerativ – dauerhaft 1–2×/Woche, kein Absetzen empfohlen.'},
+  'Schlaganfall':               {freq:2, weeks:36, note:'Nach Akutphase 1–2×/Woche für 6–12 Monate. Bei chronischen Defiziten ggf. dauerhaft fortsetzen.'},
+  'Depression':                 {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, danach individuell auf alle 2 Wochen reduzieren.'},
+  'Angststörung':               {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, dann individuell ausschleichen.'},
+  'PTBS':                       {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, in Abstimmung mit Traumatherapie.'},
+  'Long COVID':                 {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate. PEM weiter beobachten.'},
+  'Burnout':                    {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, dann nach Bedarf.'},
+  'SHT (Schädel-Hirn-Trauma)':  {freq:1, weeks:24, note:'1×/Woche für 6 Monate. Bei chronischem TBI längere Erhaltung.'},
+  'Schlafstörung':              {freq:1, weeks:12, note:'Bei Bedarf 1×/Woche, abendlich vor dem Schlafengehen.'},
+  'Migräne / Kopfschmerz':      {freq:1, weeks:24, note:'1×/Woche prophylaktisch. Nicht während akuter Attacke.'},
+  'ADHS':                       {freq:1, weeks:24, note:'1×/Woche Erhaltung, idealerweise vormittags.'},
+  'Multiple Sklerose':          {freq:2, weeks:52, note:'Symptomdominanz-abhängig 1–2×/Woche, dauerhaft.'},
+  'Tinnitus':                   {freq:1, weeks:16, note:'1×/Woche solange Verträglichkeit gut bleibt.'},
+  'Epilepsie':                  {freq:0, weeks:0,  note:'Keine automatische Empfehlung – ärztliche Verordnung erforderlich.'}
+};
+
+/* Sucht in der Anamnese die erste passende Erhaltungs-Empfehlung */
+function maintenanceSuggestionFor(diagnoses){
+  for(const d of (diagnoses || [])){
+    if(maintenanceProtocols[d]) return {diagnosis:d, ...maintenanceProtocols[d]};
+  }
+  return null;
+}
+
 /* ============================================================
    STATE
    ============================================================ */
@@ -98,6 +129,12 @@ function ensureSettings(){
   if(!db.settings.pinPatient) db.settings.pinPatient = '0000';
 }
 ensureSettings();
+/* Migration: Alte Patienten ohne maintenance-Feld nachruesten */
+db.patients.forEach(p => {
+  if(!p.maintenance){
+    p.maintenance = {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
+  }
+});
 persist();
 
 /* ============================================================
@@ -125,6 +162,8 @@ function blankPatient(){
     beschwerden:{values:{},notes:''},
     evaluierung:{values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],notes:''},
     planung:{start:today(),total:20,photos:[],photoNotes:'',supplements:[],suppNotes:'',sessions:makeSessions(20)},
+    /* Erhaltungstherapie - nur wenn enabled=true wird das Sub-Panel gezeigt */
+    maintenance:{enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''},
     ende:{values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],count:'',result:'',notes:''}
   };
 }
@@ -148,6 +187,12 @@ function ensureShape(){
   p.planung = p.planung || {};
   p.planung.total = p.planung.total || 20;
   p.planung.sessions = p.planung.sessions || makeSessions(p.planung.total);
+  /* Erhaltungstherapie nachruesten fuer alte Patienten */
+  p.maintenance = p.maintenance || {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
+  if(p.maintenance.enabled === undefined) p.maintenance.enabled = false;
+  if(!p.maintenance.frequencyPerWeek) p.maintenance.frequencyPerWeek = 1;
+  if(!p.maintenance.durationWeeks) p.maintenance.durationWeeks = 12;
+  if(!Array.isArray(p.maintenance.sessions)) p.maintenance.sessions = [];
   adjustSessions();
 }
 function adjustSessions(){
@@ -157,6 +202,79 @@ function adjustSessions(){
   while(p.planung.sessions.length < n) p.planung.sessions.push({nr:p.planung.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:''});
   if(p.planung.sessions.length > n) p.planung.sessions = p.planung.sessions.slice(0,n);
   p.planung.sessions.forEach((s,i) => s.nr = i+1);
+}
+
+/* === ERHALTUNGS-SITZUNGEN ===
+   Berechnet die Anzahl Sitzungen aus Frequenz/Woche × Wochen und
+   passt das Sessions-Array entsprechend an. Bestehende Eintraege bleiben erhalten. */
+function maintenanceTargetCount(m){
+  const f = Math.max(0, Math.min(7, Number(m.frequencyPerWeek) || 0));
+  const w = Math.max(0, Math.min(104, Number(m.durationWeeks) || 0));
+  return f * w;
+}
+
+function adjustMaintenanceSessions(){
+  const p = cur();
+  if(!p || !p.maintenance) return;
+  const m = p.maintenance;
+  const n = maintenanceTargetCount(m);
+  while(m.sessions.length < n) m.sessions.push({nr:m.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:''});
+  if(m.sessions.length > n) m.sessions = m.sessions.slice(0,n);
+  m.sessions.forEach((s,i) => s.nr = i+1);
+}
+
+/* Verteilt Sitzungs-Daten gleichmaessig in den Wochen ab Startdatum.
+   Bei freq=1: jeden Montag.
+   Bei freq=2: Mo + Do.
+   Bei freq=3: Mo + Mi + Fr.
+   Bei freq>=4: aufeinanderfolgende Werktage. */
+function generateMaintenanceDates(){
+  const p = cur();
+  if(!p || !p.maintenance) return;
+  const m = p.maintenance;
+  if(!m.start || !m.sessions.length) return;
+  const start = new Date(m.start + 'T00:00:00');
+  if(isNaN(start)) return;
+
+  const f = Math.max(1, Math.min(7, Number(m.frequencyPerWeek) || 1));
+  /* Tage-Offsets ab Wochenbeginn (Montag) */
+  const dayPatterns = {
+    1: [0],          /* Mo */
+    2: [0, 3],       /* Mo, Do */
+    3: [0, 2, 4],    /* Mo, Mi, Fr */
+    4: [0, 1, 3, 4], /* Mo, Di, Do, Fr */
+    5: [0, 1, 2, 3, 4],
+    6: [0, 1, 2, 3, 4, 5],
+    7: [0, 1, 2, 3, 4, 5, 6]
+  };
+  const pattern = dayPatterns[f] || [0];
+
+  /* Startwoche so verschieben, dass der erste Termin auf den naechsten Montag faellt
+     (oder den Starttag selbst, wenn Montag) */
+  const startDay = start.getDay(); /* 0=So, 1=Mo, ..., 6=Sa */
+  const offsetToMonday = startDay === 0 ? 1 : (startDay === 1 ? 0 : (8 - startDay));
+  const baseMonday = new Date(start);
+  baseMonday.setDate(baseMonday.getDate() + offsetToMonday);
+  /* Wenn Start ein Montag ist, von dort aus starten. Sonst auch ok, wir nehmen den ersten Montag ab Start. */
+  if(startDay === 1) baseMonday.setTime(start.getTime());
+
+  m.sessions.forEach((s, i) => {
+    const week = Math.floor(i / pattern.length);
+    const dayIdx = i % pattern.length;
+    const dt = new Date(baseMonday);
+    dt.setDate(dt.getDate() + week * 7 + pattern[dayIdx]);
+    /* Nur ueberschreiben wenn leer, damit individuelle Aenderungen erhalten bleiben */
+    if(!s.date) s.date = dt.toISOString().slice(0,10);
+  });
+}
+
+/* Default-Werte fuer Erhaltungs-Sitzungen aus der letzten Akut-Sitzung holen */
+function maintenanceDefaultsFromAcute(){
+  const p = cur();
+  if(!p) return null;
+  const lastFilled = [...(p.planung?.sessions || [])].reverse().find(s => s.hz !== '' && s.hz !== undefined);
+  if(!lastFilled) return null;
+  return {hz:lastFilled.hz, intensity:lastFilled.intensity, duration:lastFilled.duration};
 }
 
 /* ============================================================
@@ -381,6 +499,81 @@ function sessionHtml(i){
     </div>
     <div class="field"><label>Anmerkung</label><textarea data-session="${i}" data-key="note">${esc(s.note)}</textarea></div>
   </div>`;
+}
+
+/* === ERHALTUNGS-SITZUNGEN UI === */
+function maintenanceSessionHtml(i){
+  const s = cur().maintenance.sessions[i];
+  return `<div class="session maintenance-session"><h4>Erhaltung #${i+1}</h4>
+    <div class="miniGrid">
+      <div class="field"><label>Datum</label><input type="date" data-msession="${i}" data-key="date" value="${esc(s.date)}"></div>
+      <div class="field"><label>Frequenz Hz</label><input data-msession="${i}" data-key="hz" value="${esc(s.hz)}"></div>
+      <div class="field"><label>Intensität %</label><input data-msession="${i}" data-key="intensity" value="${esc(s.intensity)}"></div>
+      <div class="field"><label>Dauer min</label><input data-msession="${i}" data-key="duration" value="${esc(s.duration)}"></div>
+    </div>
+    <div class="field"><label>Anmerkung</label><textarea data-msession="${i}" data-key="note">${esc(s.note)}</textarea></div>
+  </div>`;
+}
+
+function maintenanceBlockHtml(p){
+  const m = p.maintenance || {};
+  const enabled = !!m.enabled;
+  const suggestion = maintenanceSuggestionFor(p.anamnese?.diagnoses || []);
+
+  /* Header mit Switch */
+  let html = `<div class="maintenanceBlock">
+    <div class="maintenanceHeader">
+      <div>
+        <h3 style="margin:0">🔄 Erhaltungstherapie</h3>
+        <p class="smallMuted" style="margin:4px 0 0">Nach Abschluss der Akutphase – wird typischerweise erst am Ende der Therapie aktiviert.</p>
+      </div>
+      <label class="toggleSwitch">
+        <input type="checkbox" id="maintenanceToggle" ${enabled?'checked':''}>
+        <span class="slider"></span>
+        <span class="toggleLabel">${enabled?'aktiviert':'nicht aktiviert'}</span>
+      </label>
+    </div>`;
+
+  if(!enabled){
+    html += `<div class="notice" style="margin-top:12px">Schalte die Erhaltungstherapie ein, um einen Plan zu erstellen. Bei Aktivierung wird automatisch ein Vorschlag aus den Weber-Erhaltungsschemata generiert (sofern eine passende Diagnose ausgewählt wurde).</div>`;
+    html += `</div>`;
+    return html;
+  }
+
+  /* Empfehlung anzeigen */
+  if(suggestion){
+    html += `<div class="notice ok" style="margin-top:12px">
+      <b>Empfehlung Weber Protocol Book 2025</b> für <i>${esc(suggestion.diagnosis)}</i>:
+      ${suggestion.freq > 0 ? suggestion.freq+'×/Woche für '+suggestion.weeks+' Wochen' : 'Keine automatische Empfehlung'}.
+      <br><span class="smallMuted">${esc(suggestion.note)}</span>
+      ${suggestion.freq > 0 ? '<br><button class="muted" id="applyMaintenanceSuggestion" style="margin-top:8px">Empfehlung übernehmen</button>' : ''}
+    </div>`;
+  } else {
+    html += `<div class="notice" style="margin-top:12px">Keine passende Diagnose für automatischen Vorschlag. Bitte Werte manuell eingeben.</div>`;
+  }
+
+  /* Eingaben */
+  html += `<div class="grid" style="margin-top:12px">
+    ${input('maintenance.start','Beginn Erhaltungsphase','date')}
+    ${input('maintenance.frequencyPerWeek','Sitzungen pro Woche','number')}
+    ${input('maintenance.durationWeeks','Gesamtdauer (Wochen)','number')}
+  </div>
+  <div class="topBtns">
+    <button class="muted" id="refreshMaintenance">Sitzungsfenster aktualisieren</button>
+    <button class="muted" id="generateMaintenanceDates">Datumsvorschläge erzeugen</button>
+    <button class="muted" id="copyAcuteParams">Hz/%/min aus Akut übernehmen</button>
+  </div>`;
+
+  const target = maintenanceTargetCount(m);
+  if(target > 0){
+    html += `<p class="smallMuted" style="margin-top:10px">${target} Erhaltungs-Sitzungen geplant (${m.frequencyPerWeek}×/Woche × ${m.durationWeeks} Wochen).</p>`;
+    html += `<div class="therapyGrid">${m.sessions.map((s,i) => maintenanceSessionHtml(i)).join('')}</div>`;
+  } else {
+    html += `<p class="smallMuted" style="margin-top:10px">Noch keine Sitzungen geplant – Frequenz und Dauer eingeben.</p>`;
+  }
+  html += textarea('maintenance.notes','Anmerkungen zur Erhaltungstherapie');
+  html += `</div>`;
+  return html;
 }
 
 /* ============================================================
@@ -958,9 +1151,10 @@ function renderPanels(){
       ${textarea('planung.photoNotes','Photosensitizer – Dosierung / Zeitpunkt / Besonderheiten','z.B. Methylenblau 0,5 mg/kg, 45 min vor Sitzung…')}
       <h3>Begleitmedikamente / Begleitmittel – Mehrfachauswahl</h3>${chips('planung.supplements',supplements)}
       ${textarea('planung.suppNotes','Begleitmittel – Dosierung / Notizen','z.B. Sonnenmoor 25–30 ml nüchtern morgens…')}
-      <h3>Sitzungsprotokoll</h3>
+      <h3>Akut-Sitzungsprotokoll</h3>
       <p class="notice">Die Anzahl der Sitzungsfenster richtet sich nach „Geplante Sitzungen gesamt". Bei 10 Sitzungen werden 10 Fenster erzeugt.</p>
-      <div class="therapyGrid">${p.planung.sessions.map((s,i) => sessionHtml(i)).join('')}</div>`;
+      <div class="therapyGrid">${p.planung.sessions.map((s,i) => sessionHtml(i)).join('')}</div>
+      ${maintenanceBlockHtml(p)}`;
   }
 
   if(q('ende')){
@@ -1088,7 +1282,14 @@ function saveForm(){
   document.querySelectorAll('[data-session]').forEach(el => {
     p.planung.sessions[+el.dataset.session][el.dataset.key] = el.value;
   });
+  /* Erhaltungs-Sitzungen */
+  document.querySelectorAll('[data-msession]').forEach(el => {
+    if(p.maintenance && p.maintenance.sessions[+el.dataset.msession]){
+      p.maintenance.sessions[+el.dataset.msession][el.dataset.key] = el.value;
+    }
+  });
   adjustSessions();
+  if(p.maintenance && p.maintenance.enabled) adjustMaintenanceSessions();
   persist();
   renderList();
   applyGlobalSettings(); /* Praxisname etc. live updaten */
@@ -1100,6 +1301,19 @@ function wireDynamic(){
     el.addEventListener('change', () => {
       saveForm();
       if(el.dataset.path === 'planung.total') render();
+      if(el.dataset.path === 'maintenance.frequencyPerWeek' || el.dataset.path === 'maintenance.durationWeeks'){
+        const p = cur();
+        if(p && p.maintenance){
+          adjustMaintenanceSessions();
+          /* Bei Frequenz-Aenderung muessen Wochentage neu berechnet werden */
+          if(el.dataset.path === 'maintenance.frequencyPerWeek'){
+            p.maintenance.sessions.forEach(s => s.date = '');
+          }
+          generateMaintenanceDates();
+          persist();
+          render();
+        }
+      }
     });
     if(el.dataset.path === 'planung.total'){
       el.addEventListener('input', () => {
@@ -1113,6 +1327,92 @@ function wireDynamic(){
   if(ap) ap.onclick = applyProtocolToSessions;
   const rs = document.getElementById('refreshSessions');
   if(rs) rs.onclick = updateSessionCountFromField;
+
+  /* === MAINTENANCE-WIRING === */
+  const mt = document.getElementById('maintenanceToggle');
+  if(mt){
+    mt.onchange = () => {
+      const p = cur(); if(!p) return;
+      p.maintenance.enabled = mt.checked;
+      /* Beim ersten Aktivieren: Vorschlag aus Diagnose direkt anwenden */
+      if(mt.checked){
+        const sug = maintenanceSuggestionFor(p.anamnese?.diagnoses || []);
+        if(sug && sug.freq > 0){
+          if(!p.maintenance.frequencyPerWeek || p.maintenance.frequencyPerWeek === 1) p.maintenance.frequencyPerWeek = sug.freq;
+          if(!p.maintenance.durationWeeks || p.maintenance.durationWeeks === 12) p.maintenance.durationWeeks = sug.weeks;
+        }
+        /* Default: Erhaltungs-Beginn = heute, falls leer */
+        if(!p.maintenance.start) p.maintenance.start = today();
+        adjustMaintenanceSessions();
+        /* Defaults aus letzter Akut-Sitzung uebernehmen, wenn Sitzungen noch leer */
+        const def = maintenanceDefaultsFromAcute();
+        if(def){
+          p.maintenance.sessions.forEach(s => {
+            if(!s.hz) s.hz = def.hz;
+            if(!s.intensity) s.intensity = def.intensity;
+            if(!s.duration) s.duration = def.duration;
+          });
+        }
+        generateMaintenanceDates();
+      }
+      persist(); render();
+    };
+  }
+  const ams = document.getElementById('applyMaintenanceSuggestion');
+  if(ams){
+    ams.onclick = () => {
+      const p = cur(); if(!p) return;
+      const sug = maintenanceSuggestionFor(p.anamnese?.diagnoses || []);
+      if(!sug || sug.freq === 0){ alert('Keine Empfehlung verfügbar.'); return; }
+      p.maintenance.frequencyPerWeek = sug.freq;
+      p.maintenance.durationWeeks = sug.weeks;
+      adjustMaintenanceSessions();
+      generateMaintenanceDates();
+      const def = maintenanceDefaultsFromAcute();
+      if(def){
+        p.maintenance.sessions.forEach(s => {
+          if(!s.hz) s.hz = def.hz;
+          if(!s.intensity) s.intensity = def.intensity;
+          if(!s.duration) s.duration = def.duration;
+        });
+      }
+      persist(); render();
+    };
+  }
+  const rm = document.getElementById('refreshMaintenance');
+  if(rm){
+    rm.onclick = () => {
+      saveForm();
+      adjustMaintenanceSessions();
+      persist(); render();
+    };
+  }
+  const gmd = document.getElementById('generateMaintenanceDates');
+  if(gmd){
+    gmd.onclick = () => {
+      saveForm();
+      const p = cur(); if(!p) return;
+      /* Datumsfelder leeren, dann neu generieren */
+      p.maintenance.sessions.forEach(s => s.date = '');
+      generateMaintenanceDates();
+      persist(); render();
+    };
+  }
+  const cap = document.getElementById('copyAcuteParams');
+  if(cap){
+    cap.onclick = () => {
+      saveForm();
+      const def = maintenanceDefaultsFromAcute();
+      if(!def){ alert('Keine Akut-Sitzungs-Werte vorhanden.'); return; }
+      const p = cur();
+      p.maintenance.sessions.forEach(s => {
+        s.hz = def.hz;
+        s.intensity = def.intensity;
+        s.duration = def.duration;
+      });
+      persist(); render();
+    };
+  }
 
   const ts = document.getElementById('themeSelect');
   if(ts){
@@ -1289,7 +1589,8 @@ function makeReportHtml(anon){
     <p><b>Diagnosen:</b> ${esc((p.anamnese.diagnoses||[]).join(', ')||'-')}<br>
     <b>Geburtsdatum:</b> ${esc(p.stamm.birth||'-')}<br>
     <b>Therapiebeginn:</b> ${esc(p.planung.start||'-')}<br>
-    <b>Sitzungen geplant:</b> ${esc(p.planung.total||'')} · <b>tatsächlich:</b> ${esc(p.ende.count||'-')}<br>
+    <b>Akut-Sitzungen:</b> geplant ${esc(p.planung.total||'')} · tatsächlich ${esc(p.ende.count||'-')}<br>
+    ${p.maintenance && p.maintenance.enabled ? `<b>Erhaltungstherapie:</b> ${esc(p.maintenance.frequencyPerWeek||'-')}×/Woche × ${esc(p.maintenance.durationWeeks||'-')} Wochen ab ${esc(p.maintenance.start||'-')} (${maintenanceTargetCount(p.maintenance)} Sitzungen geplant)<br>` : ''}
     <b>End-Ergebnis:</b> ${esc(p.ende.result||'-')}</p>`;
 
   html += '<table class="evalTable"><thead><tr><th>Parameter</th><th>Vor Therapie</th><th>Ende</th><th>Bewertung</th></tr></thead><tbody>';

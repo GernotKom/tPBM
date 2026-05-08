@@ -188,6 +188,25 @@ canvas{width:100%;max-height:360px}
   h3{page-break-before:auto;page-break-after:avoid}
 }
 .printHeader{display:none}
+
+/* === ERHALTUNGSTHERAPIE === */
+.maintenanceBlock{margin-top:24px;padding:18px;background:var(--muted);border:1px solid var(--line);border-radius:14px;border-left:4px solid var(--brand)}
+.maintenanceHeader{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.maintenance-session{border-left:3px solid var(--brand2)}
+
+/* Toggle-Switch - iOS-Style */
+.toggleSwitch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+.toggleSwitch input{position:absolute;opacity:0;width:0;height:0}
+.toggleSwitch .slider{position:relative;display:inline-block;width:52px;height:30px;background:#ccc;border-radius:30px;transition:.2s}
+.toggleSwitch .slider::before{content:'';position:absolute;left:3px;top:3px;width:24px;height:24px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 3px #0003}
+.toggleSwitch input:checked + .slider{background:var(--brand)}
+.toggleSwitch input:checked + .slider::before{transform:translateX(22px)}
+.toggleSwitch .toggleLabel{font-size:13px;font-weight:700;color:var(--brand)}
+
+@media print{
+  .maintenanceBlock{break-inside:avoid;background:#f7f3ef!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .toggleSwitch{display:none}
+}
 </style>
 </head>
 <body>
