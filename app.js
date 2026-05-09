@@ -1223,12 +1223,13 @@ function renderPanels(){
   }
 
   if(q('ende')){
+    /* Farbverlauf von Dunkelgruen ueber Hellgruen / Grau / Orange zu Dunkelrot */
     const comparisonOptions = [
-      {label:'Deutlich besser',     value:'Deutlich besser',     color:'#1b8a4f'},
-      {label:'Etwas besser',         value:'Etwas besser',         color:'#7cc36e'},
-      {label:'Unverändert',          value:'Unverändert',          color:'#cccccc'},
-      {label:'Etwas schlechter',     value:'Etwas schlechter',     color:'#e89c5d'},
-      {label:'Deutlich schlechter',  value:'Deutlich schlechter',  color:'#c84545'}
+      {label:'Deutlich besser',     value:'Deutlich besser',     color:'#0d6b3c'},
+      {label:'Etwas besser',         value:'Etwas besser',         color:'#5fa86c'},
+      {label:'Unverändert',          value:'Unverändert',          color:'#9aa0a6'},
+      {label:'Etwas schlechter',     value:'Etwas schlechter',     color:'#d97a3c'},
+      {label:'Deutlich schlechter',  value:'Deutlich schlechter',  color:'#a72424'}
     ];
     const currentComp = get('ende.overallComparison') || '';
     const compButtons = comparisonOptions.map(o =>
@@ -1237,6 +1238,18 @@ function renderPanels(){
          <span>${esc(o.label)}</span>
        </label>`
     ).join('');
+
+    /* Smiley-Skala fuer Zufriedenheit 1-10 */
+    const smileys = ['😞','😟','😕','😐','🙂','😊','😀','😄','😁','🤩'];
+    const currentSat = String(get('ende.satisfaction') || '');
+    const satButtons = smileys.map((face, i) => {
+      const v = String(i + 1);
+      return `<label class="${currentSat===v?'active':''}">
+        <input type="radio" name="ende.satisfaction" data-path="ende.satisfaction" value="${v}" ${currentSat===v?'checked':''}>
+        <span class="smiley">${face}</span>
+        <span class="num">${v}</span>
+      </label>`;
+    }).join('');
 
     q('ende').innerHTML = `<h2>🏁 End-Evaluierung</h2>
       <div class="grid">
@@ -1250,7 +1263,7 @@ function renderPanels(){
 
       <h3>⭐ Wie zufrieden sind Sie mit der WeberBrain®-Therapie insgesamt?</h3>
       <p class="smallMuted">1 = gar nicht zufrieden &nbsp;·&nbsp; 10 = vollständig zufrieden</p>
-      ${scale('ende.satisfaction','Zufriedenheit')}
+      <div class="field"><div class="smileyScale">${satButtons}</div></div>
       ` + evalFull('ende','📋 Fragebogen nach Therapie','Exakt derselbe Fragebogen wie bei der Evaluierung vor Therapie.');
   }
 
