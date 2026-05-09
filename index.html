@@ -37,6 +37,8 @@ button:active{transform:scale(.98)}
 .sidebar,.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;box-shadow:0 1px 8px #00000010}
 
 .patientList{display:flex;flex-direction:column;gap:8px}
+.sidebarBtns{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.sidebarBtns button{width:100%;text-align:center;padding:12px 14px;font-size:15px;line-height:1.25;white-space:normal}
 .patientItem{padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--card);cursor:pointer}
 .patientItem.active{outline:3px solid #0b6cf066}
 
@@ -278,10 +280,12 @@ canvas{width:100%;max-height:360px}
     <div class="field"><input id="search" placeholder="Patient suchen…"></div>
     <div id="patientList" class="patientList"></div>
     <hr>
-    <button class="muted" id="exportSinglePatientBtn">📤 Diesen Patienten exportieren</button>
-    <button class="muted" id="importSidebarBtn" style="margin-top:6px">📥 Patient/Kartei importieren</button>
-    <input id="importSidebarFile" type="file" accept="application/json" class="hidden">
-    <button class="danger" id="deleteBtn" style="margin-top:10px">Aktuellen Patienten löschen</button>
+    <div class="sidebarBtns">
+      <button class="muted" id="exportSinglePatientBtn">📤 Diesen Patienten exportieren</button>
+      <button class="muted" id="importSidebarBtn">📥 Patient/Kartei importieren</button>
+      <input id="importSidebarFile" type="file" accept="application/json" class="hidden">
+      <button class="danger" id="deleteBtn">🗑️ Aktuellen Patienten löschen</button>
+    </div>
     <div class="notice ok"><b>DSGVO:</b> Daten werden lokal in diesem Browser gespeichert. Regelmäßig Backup exportieren.</div>
   </aside>
   <main class="card">
