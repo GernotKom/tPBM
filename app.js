@@ -1557,99 +1557,104 @@ function wireDynamic(){
     iff.onchange = e => {
       const f = e.target.files[0];
       if(!f) return;
-      const r = new FileReader();
-      r.onload = () => {
-        try{
-          const data = JSON.parse(r.result);
-
-          /* Format 1: Einzelner Patient mit _type-Marker (neue Variante) */
-          if(data._type === 'single_patient' && data.patient){
-            importSinglePatient(data.patient);
-            return;
-          }
-
-          /* Format 2: Einzelner Patient ohne Marker (alte Form, hat .id und .stamm) */
-          if(data.id && data.stamm){
-            importSinglePatient(data);
-            return;
-          }
-
-          /* Format 3: Volles Backup (mit patients-Array) */
-          if(data.patients && Array.isArray(data.patients)){
-            const existingIds = new Set(db.patients.map(x => x.id));
-            let added = 0, skipped = 0;
-            data.patients.forEach(np => {
-              if(!existingIds.has(np.id)){
-                /* Maintenance-Feld nachruesten falls fehlt */
-                if(!np.maintenance) np.maintenance = {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
-                db.patients.push(np);
-                added++;
-              } else {
-                skipped++;
-              }
-            });
-            if(data.settings) db.settings = Object.assign({}, db.settings, data.settings);
-            ensureSettings();
-            persist(); applyGlobalSettings(); render();
-            alert(`Backup importiert: ${added} neue Patienten hinzugefügt, ${skipped} bereits vorhanden (unverändert).`);
-            return;
-          }
-
-          alert('Import fehlgeschlagen: Datei hat ein unbekanntes Format.');
-        }catch(err){
-          alert('Import fehlgeschlagen: '+err.message);
-        }
-      };
-      r.readAsText(f);
+      handleImportFile(f);
+      /* File-Input zuruecksetzen, damit dieselbe Datei erneut importiert werden kann */
+      iff.value = '';
     };
-  }
-
-  /* Helper: einzelner Patient importieren mit Konflikt-Behandlung */
-  function importSinglePatient(np){
-    /* Maintenance-Feld nachruesten falls fehlt (alte Exporte) */
-    if(!np.maintenance) np.maintenance = {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
-
-    const existing = db.patients.find(x => x.id === np.id);
-    if(existing){
-      const name = np.stamm?.name || 'Unbenannt';
-      const choice = prompt(
-        `Patient "${name}" ist bereits vorhanden.\n\n` +
-        `Was möchtest du tun?\n` +
-        `  1 = Bestehenden Datensatz mit Import-Daten ÜBERSCHREIBEN\n` +
-        `  2 = Als KOPIE hinzufügen (neue ID)\n` +
-        `  3 = Abbrechen`,
-        '2'
-      );
-      if(choice === '1'){
-        /* Ueberschreiben: existing in-place ersetzen */
-        const idx = db.patients.findIndex(x => x.id === np.id);
-        db.patients[idx] = np;
-        persist(); render();
-        alert(`Patient "${name}" wurde überschrieben.`);
-      } else if(choice === '2'){
-        /* Als Kopie: neue ID + Hinweis im Namen */
-        np.id = 'p_'+Date.now();
-        np.stamm = np.stamm || {};
-        np.stamm.name = (np.stamm.name || 'Unbenannt') + ' (Import)';
-        db.patients.push(np);
-        currentId = np.id;
-        persist(); render();
-        alert(`Patient "${name}" wurde als Kopie hinzugefügt.`);
-      } else {
-        /* Abgebrochen */
-        return;
-      }
-    } else {
-      /* Neuer Patient - einfach hinzufuegen */
-      db.patients.push(np);
-      currentId = np.id;
-      persist(); render();
-      alert(`Patient "${np.stamm?.name||'Unbenannt'}" importiert.`);
-    }
   }
 
   const ab = document.getElementById('anonBtn');
   if(ab) ab.onclick = exportAnon;
+}
+
+/* ========================================================
+   IMPORT-LOGIK (auf Modul-Ebene, damit auch Sidebar-Btn sie nutzen kann)
+   ======================================================== */
+function handleImportFile(f){
+  const r = new FileReader();
+  r.onload = () => {
+    try{
+      const data = JSON.parse(r.result);
+
+      /* Format 1: Einzelner Patient mit _type-Marker (neue Variante) */
+      if(data._type === 'single_patient' && data.patient){
+        importSinglePatient(data.patient);
+        return;
+      }
+
+      /* Format 2: Einzelner Patient ohne Marker (alte Form, hat .id und .stamm) */
+      if(data.id && data.stamm){
+        importSinglePatient(data);
+        return;
+      }
+
+      /* Format 3: Volles Backup (mit patients-Array) */
+      if(data.patients && Array.isArray(data.patients)){
+        const existingIds = new Set(db.patients.map(x => x.id));
+        let added = 0, skipped = 0;
+        data.patients.forEach(np => {
+          if(!existingIds.has(np.id)){
+            /* Maintenance-Feld nachruesten falls fehlt */
+            if(!np.maintenance) np.maintenance = {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
+            db.patients.push(np);
+            added++;
+          } else {
+            skipped++;
+          }
+        });
+        if(data.settings) db.settings = Object.assign({}, db.settings, data.settings);
+        ensureSettings();
+        persist(); applyGlobalSettings(); render();
+        alert(`Backup importiert: ${added} neue Patienten hinzugefügt, ${skipped} bereits vorhanden (unverändert).`);
+        return;
+      }
+
+      alert('Import fehlgeschlagen: Datei hat ein unbekanntes Format.');
+    }catch(err){
+      alert('Import fehlgeschlagen: '+err.message);
+    }
+  };
+  r.readAsText(f);
+}
+
+/* Einzelner Patient importieren mit Konflikt-Behandlung */
+function importSinglePatient(np){
+  /* Maintenance-Feld nachruesten falls fehlt (alte Exporte) */
+  if(!np.maintenance) np.maintenance = {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
+
+  const existing = db.patients.find(x => x.id === np.id);
+  if(existing){
+    const name = np.stamm?.name || 'Unbenannt';
+    const choice = prompt(
+      `Patient "${name}" ist bereits vorhanden.\n\n` +
+      `Was möchtest du tun?\n` +
+      `  1 = Bestehenden Datensatz mit Import-Daten ÜBERSCHREIBEN\n` +
+      `  2 = Als KOPIE hinzufügen (neue ID)\n` +
+      `  3 = Abbrechen`,
+      '2'
+    );
+    if(choice === '1'){
+      const idx = db.patients.findIndex(x => x.id === np.id);
+      db.patients[idx] = np;
+      currentId = np.id;
+      persist(); render();
+      alert(`Patient "${name}" wurde überschrieben.`);
+    } else if(choice === '2'){
+      np.id = 'p_'+Date.now();
+      np.stamm = np.stamm || {};
+      np.stamm.name = (np.stamm.name || 'Unbenannt') + ' (Import)';
+      db.patients.push(np);
+      currentId = np.id;
+      persist(); render();
+      alert(`Patient "${name}" wurde als Kopie hinzugefügt.`);
+    }
+    /* '3' oder Abbruch: nichts tun */
+  } else {
+    db.patients.push(np);
+    currentId = np.id;
+    persist(); render();
+    alert(`Patient "${np.stamm?.name||'Unbenannt'}" importiert.`);
+  }
 }
 
 /* ============================================================
@@ -1943,6 +1948,14 @@ document.getElementById('saveBtn').onclick = () => { saveForm(); alert('Gespeich
 document.getElementById('exportBtn').onclick = exportJson;
 document.getElementById('printBtn').onclick = doPrint;
 document.getElementById('exportSinglePatientBtn').onclick = exportSinglePatient;
+/* Sidebar-Import: oeffnet versteckten File-Input, der dann handleImportFile aufruft */
+document.getElementById('importSidebarBtn').onclick = () => document.getElementById('importSidebarFile').click();
+document.getElementById('importSidebarFile').onchange = e => {
+  const f = e.target.files[0];
+  if(!f) return;
+  handleImportFile(f);
+  e.target.value = ''; /* Input zuruecksetzen, damit dieselbe Datei erneut importiert werden kann */
+};
 document.getElementById('lockBtn').onclick = () => { saveForm(); showLock(); };
 document.getElementById('deleteBtn').onclick = () => {
   if(!cur()) return;
