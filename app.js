@@ -1270,8 +1270,8 @@ function renderPanels(){
 
       <h3>Backup</h3>
       <div class="topBtns">
-        <button class="muted" id="importBtn">JSON importieren</button>
-        <button class="muted" id="exportBtn2">Backup jetzt exportieren</button>
+        <button class="muted" id="importBtn">📥 JSON importieren (Patient oder Kartei)</button>
+        <button class="muted" id="exportBtn2">💾 Kartei-Sicherung jetzt erstellen</button>
       </div>
       <input id="importFile" type="file" accept="application/json" class="hidden">
 
@@ -1605,7 +1605,7 @@ function handleImportFile(f){
         if(data.settings) db.settings = Object.assign({}, db.settings, data.settings);
         ensureSettings();
         persist(); applyGlobalSettings(); render();
-        alert(`Backup importiert: ${added} neue Patienten hinzugefügt, ${skipped} bereits vorhanden (unverändert).`);
+        alert(`Kartei-Sicherung importiert: ${added} neue Patienten zur Kartei hinzugefügt, ${skipped} waren bereits vorhanden (unverändert). Gesamt: ${db.patients.length} Patienten.`);
         return;
       }
 
@@ -1626,11 +1626,11 @@ function importSinglePatient(np){
   if(existing){
     const name = np.stamm?.name || 'Unbenannt';
     const choice = prompt(
-      `Patient "${name}" ist bereits vorhanden.\n\n` +
+      `Patient "${name}" ist bereits in der Kartei vorhanden.\n\n` +
       `Was möchtest du tun?\n` +
       `  1 = Bestehenden Datensatz mit Import-Daten ÜBERSCHREIBEN\n` +
-      `  2 = Als KOPIE hinzufügen (neue ID)\n` +
-      `  3 = Abbrechen`,
+      `  2 = Als zusätzliche KOPIE zur Kartei hinzufügen (neue ID)\n` +
+      `  3 = Abbrechen (Kartei bleibt unverändert)`,
       '2'
     );
     if(choice === '1'){
@@ -1638,7 +1638,7 @@ function importSinglePatient(np){
       db.patients[idx] = np;
       currentId = np.id;
       persist(); render();
-      alert(`Patient "${name}" wurde überschrieben.`);
+      alert(`Patient "${name}" wurde überschrieben. Die übrige Kartei (${db.patients.length} Patienten) bleibt unverändert.`);
     } else if(choice === '2'){
       np.id = 'p_'+Date.now();
       np.stamm = np.stamm || {};
@@ -1646,14 +1646,14 @@ function importSinglePatient(np){
       db.patients.push(np);
       currentId = np.id;
       persist(); render();
-      alert(`Patient "${name}" wurde als Kopie hinzugefügt.`);
+      alert(`Patient "${name}" wurde als Kopie zur Kartei hinzugefügt. Die Kartei enthält jetzt ${db.patients.length} Patienten.`);
     }
     /* '3' oder Abbruch: nichts tun */
   } else {
     db.patients.push(np);
     currentId = np.id;
     persist(); render();
-    alert(`Patient "${np.stamm?.name||'Unbenannt'}" importiert.`);
+    alert(`Patient "${np.stamm?.name||'Unbenannt'}" zur Kartei hinzugefügt. Die Kartei enthält jetzt ${db.patients.length} Patienten.`);
   }
 }
 
