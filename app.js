@@ -226,7 +226,7 @@ function blankPatient(){
     planung:{start:today(),total:20,photos:[],photoNotes:'',supplements:[],suppNotes:'',sessions:makeSessions(20)},
     /* Erhaltungstherapie - nur wenn enabled=true wird das Sub-Panel gezeigt */
     maintenance:{enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''},
-    ende:{values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],count:'',result:'',notes:''}
+    ende:{values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],count:'',result:'',overallComparison:'',satisfaction:'',notes:''}
   };
 }
 function makeSessions(n){
@@ -242,7 +242,9 @@ function ensureShape(){
   p.evaluierung.values = p.evaluierung.values || {};
   p.evaluierung.mood = p.evaluierung.mood || [];
   p.evaluierung.vegetative = p.evaluierung.vegetative || [];
-  p.ende = p.ende || {values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],count:'',result:'',notes:''};
+  p.ende = p.ende || {values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],count:'',result:'',overallComparison:'',satisfaction:'',notes:''};
+  if(p.ende.overallComparison === undefined) p.ende.overallComparison = '';
+  if(p.ende.satisfaction === undefined) p.ende.satisfaction = '';
   p.ende.values = p.ende.values || {};
   p.ende.mood = p.ende.mood || [];
   p.ende.vegetative = p.ende.vegetative || [];
@@ -1221,18 +1223,54 @@ function renderPanels(){
   }
 
   if(q('ende')){
+    const comparisonOptions = [
+      {label:'Deutlich besser',     value:'Deutlich besser',     color:'#1b8a4f'},
+      {label:'Etwas besser',         value:'Etwas besser',         color:'#7cc36e'},
+      {label:'Unverändert',          value:'Unverändert',          color:'#cccccc'},
+      {label:'Etwas schlechter',     value:'Etwas schlechter',     color:'#e89c5d'},
+      {label:'Deutlich schlechter',  value:'Deutlich schlechter',  color:'#c84545'}
+    ];
+    const currentComp = get('ende.overallComparison') || '';
+    const compButtons = comparisonOptions.map(o =>
+      `<label class="compOption ${currentComp===o.value?'active':''}" style="--col:${o.color}">
+         <input type="radio" name="ende.overallComparison" data-path="ende.overallComparison" value="${esc(o.value)}" ${currentComp===o.value?'checked':''}>
+         <span>${esc(o.label)}</span>
+       </label>`
+    ).join('');
+
     q('ende').innerHTML = `<h2>🏁 End-Evaluierung</h2>
       <div class="grid">
         ${input('ende.count','Anzahl tatsächlich durchgeführter Sitzungen','number')}
-        <div class="field"><label>Gesamtergebnis</label><select data-path="ende.result"><option></option>${['Deutliche Verbesserung','Leichte Verbesserung','Keine Veränderung','Leichte Verschlechterung','Deutliche Verschlechterung'].map(x => `<option ${get('ende.result')===x?'selected':''}>${x}</option>`).join('')}</select></div>
-      </div>` + evalFull('ende','📋 Fragebogen nach Therapie','Exakt derselbe Fragebogen wie bei der Evaluierung vor Therapie.');
+        <div class="field"><label>Gesamtergebnis (Therapeuten-Einschätzung)</label><select data-path="ende.result"><option></option>${['Deutliche Verbesserung','Leichte Verbesserung','Keine Veränderung','Leichte Verschlechterung','Deutliche Verschlechterung'].map(x => `<option ${get('ende.result')===x?'selected':''}>${x}</option>`).join('')}</select></div>
+      </div>
+
+      <h3>🎯 Wie beurteilen Sie Ihren Gesamtzustand im Vergleich zu Therapiebeginn?</h3>
+      <p class="smallMuted">Patienten-Selbsteinschätzung – bitte eine Stufe wählen.</p>
+      <div class="compScale">${compButtons}</div>
+
+      <h3>⭐ Wie zufrieden sind Sie mit der WeberBrain®-Therapie insgesamt?</h3>
+      <p class="smallMuted">1 = gar nicht zufrieden &nbsp;·&nbsp; 10 = vollständig zufrieden</p>
+      ${scale('ende.satisfaction','Zufriedenheit')}
+      ` + evalFull('ende','📋 Fragebogen nach Therapie','Exakt derselbe Fragebogen wie bei der Evaluierung vor Therapie.');
   }
 
   if(q('auswertung')){
     q('auswertung').innerHTML = `<h2>📈 Patienten-Auswertung</h2>
-      <p class="chartNote">Grafik: Blau = Wert vor Therapie, Grün = Wert nach Therapie. In der Tabelle bedeutet Grün Verbesserung, Rot Verschlechterung, Grau unverändert.</p>
-      <canvas id="chart" width="1000" height="520"></canvas>
-      <div class="report">${makeReportHtml(false)}</div>
+
+      <h3 style="margin-top:18px">Symptom-Veränderung im Detail</h3>
+      <p class="chartNote">🔵 Vor Therapie · 🟢 Verbesserung · 🔴 Verschlechterung · ⚪ Unverändert<br>
+        <span class="smallMuted">Bei Beschwerden bedeutet eine niedrigere Zahl Verbesserung. Bei Schlafqualität ist eine höhere Zahl besser. Die Farbe der „nach"-Balken zeigt die tatsächliche Richtung der Veränderung.</span></p>
+      <canvas id="chart" width="1000" height="540"></canvas>
+
+      <h3 style="margin-top:24px">Verteilung der Veränderungen</h3>
+      <p class="chartNote">Anteil der Symptome, die sich verbessert, verschlechtert oder nicht verändert haben.</p>
+      <canvas id="pieChart" width="600" height="320"></canvas>
+
+      <h3 style="margin-top:24px">Vergleich Vor / Nach – alle Werte</h3>
+      <p class="chartNote">Jeder Parameter mit den Punktwerten direkt nebeneinander zum visuellen Vergleich.</p>
+      <canvas id="barChart" width="1000" height="380"></canvas>
+
+      <div class="report" style="margin-top:24px">${makeReportHtml(false)}</div>
       <button class="muted no-print" id="anonBtn">Anonymisierte Patienten-Auswertung exportieren</button>`;
   }
 
@@ -1300,7 +1338,7 @@ function renderPanels(){
   }
 
   wireDynamic();
-  if(activeTab === 'auswertung') drawChart();
+  if(activeTab === 'auswertung') drawAllCharts();
   if(activeTab === 'forschung') renderResearchPanel();
 }
 
@@ -1759,9 +1797,12 @@ function makeReportHtml(anon){
     <p><b>Diagnosen:</b> ${esc((p.anamnese.diagnoses||[]).join(', ')||'-')}<br>
     <b>Geburtsdatum:</b> ${esc(p.stamm.birth||'-')}<br>
     <b>Therapiebeginn:</b> ${esc(p.planung.start||'-')}<br>
-    <b>Akut-Sitzungen:</b> geplant ${esc(p.planung.total||'')} · tatsächlich ${esc(p.ende.count||'-')}<br>
+    <b>Akut-Sitzungen:</b> ${esc(p.planung.total||'?')} geplant · ${p.ende.count ? esc(p.ende.count)+' tatsächlich durchgeführt' : '<i>noch nicht erfasst</i>'}<br>
     ${p.maintenance && p.maintenance.enabled ? `<b>Erhaltungstherapie:</b> ${esc(p.maintenance.frequencyPerWeek||'-')}×/Woche × ${esc(p.maintenance.durationWeeks||'-')} Wochen ab ${esc(p.maintenance.start||'-')} (${maintenanceTargetCount(p.maintenance)} Sitzungen geplant)<br>` : ''}
-    <b>End-Ergebnis:</b> ${esc(p.ende.result||'-')}</p>`;
+    <b>End-Ergebnis (Therapeut):</b> ${esc(p.ende.result||'-')}<br>
+    ${p.ende.overallComparison ? `<b>Selbsteinschätzung Patient:</b> ${esc(p.ende.overallComparison)}<br>` : ''}
+    ${p.ende.satisfaction !== '' && p.ende.satisfaction !== undefined && p.ende.satisfaction !== null ? `<b>Zufriedenheit mit der Therapie:</b> ${esc(p.ende.satisfaction)}/10<br>` : ''}
+    </p>`;
 
   html += '<table class="evalTable"><thead><tr><th>Parameter</th><th>Vor Therapie</th><th>Ende</th><th>Bewertung</th></tr></thead><tbody>';
   symptoms.forEach(s => {
@@ -1809,43 +1850,281 @@ function makeReport(anon){
   return lines.join('\n');
 }
 
+/* ============================================================
+   GRAFIKEN FUER AUSWERTUNG
+   ============================================================ */
+
+/* Bewertet eine Veraenderung: -1 = schlechter, 0 = unveraendert, +1 = besser
+   higherIsBetter: true fuer Schlafqualitaet, false fuer Beschwerden */
+function changeDirection(pre, post, higherIsBetter){
+  if(pre === post) return 0;
+  const delta = post - pre;
+  if(higherIsBetter) return delta > 0 ? 1 : -1;
+  return delta < 0 ? 1 : -1;
+}
+function changeColor(dir){
+  if(dir > 0) return '#1b8a4f'; /* gruen */
+  if(dir < 0) return '#c84545'; /* rot */
+  return '#9aa1a8';             /* grau */
+}
+
+/* Hauptgrafik: pro Zeile ein Symptom mit Vor- und Nach-Balken
+   - Vor: dezenter blauer Balken (Referenz)
+   - Nach: kraeftiger Balken in grün/rot/grau je nach Veraenderungsrichtung
+   - Delta-Symbol rechts mit Punktzahl */
 function drawChart(){
   const c = document.getElementById('chart');
   if(!c) return;
-  /* Retina-Schaerfung */
   const dpr = window.devicePixelRatio || 1;
   const cssW = c.clientWidth || 1000;
-  const cssH = 520;
+  const cssH = 540;
   c.width = cssW * dpr; c.height = cssH * dpr;
   const ctx = c.getContext('2d');
-  if(!ctx) return; /* kein 2D-Context (z.B. in Test-Umgebungen) - elegant abbrechen */
+  if(!ctx) return;
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,cssW,cssH);
 
   const p = cur();
-  const vals = symptoms.map(s => ({s, pre:Number(p.evaluierung.values?.[s]||0), post:Number(p.ende.values?.[s]||0)}));
-  vals.push({s:'Schlafqualität', pre:Number(p.evaluierung.sleepQuality||0), post:Number(p.ende.sleepQuality||0)});
+  /* { name, pre, post, higherIsBetter } */
+  const vals = symptoms.map(s => ({name:s, pre:Number(p.evaluierung.values?.[s]||0), post:Number(p.ende.values?.[s]||0), higherIsBetter:false}));
+  vals.push({name:'Schlafqualität', pre:Number(p.evaluierung.sleepQuality||0), post:Number(p.ende.sleepQuality||0), higherIsBetter:true});
 
-  const max = 10, left = 230, top = 25, row = 38;
-  const w = Math.min(650, cssW - left - 120);
-  ctx.font = '14px system-ui';
+  const max = 10, left = 230, top = 30, row = 40;
+  const barW = Math.min(560, cssW - left - 180);
+  ctx.font = '14px system-ui, sans-serif';
+  ctx.textBaseline = 'middle';
+
+  const textCol = getComputedStyle(document.body).getPropertyValue('--text') || '#222';
+
   vals.forEach((v,i) => {
     const y = top + i*row;
-    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text');
-    ctx.fillText(v.s.slice(0,28), 10, y+14);
-    ctx.fillStyle = '#dfe6ef'; ctx.fillRect(left, y, w, 8);
-    ctx.fillStyle = '#0b6cf0'; ctx.fillRect(left, y, w*(v.pre/max), 10);
-    ctx.fillStyle = '#007a53'; ctx.fillRect(left, y+14, w*(v.post/max), 10);
-    ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text');
-    ctx.fillText('vor '+String(v.pre), left+w+8, y+10);
-    ctx.fillText('ende '+String(v.post), left+w+8, y+25);
+    const dir = changeDirection(v.pre, v.post, v.higherIsBetter);
+    const postCol = changeColor(dir);
+
+    /* Symptom-Label */
+    ctx.fillStyle = textCol;
+    ctx.textAlign = 'left';
+    ctx.fillText(v.name.length > 32 ? v.name.slice(0,30)+'…' : v.name, 10, y + 12);
+
+    /* Hintergrund-Skala */
+    ctx.fillStyle = '#e8eaed';
+    ctx.fillRect(left, y, barW, 24);
+
+    /* Vor-Balken (dezent) */
+    ctx.fillStyle = '#7ba6d9';
+    ctx.fillRect(left, y, barW*(v.pre/max), 11);
+
+    /* Nach-Balken (richtungsbasiert) */
+    ctx.fillStyle = postCol;
+    ctx.fillRect(left, y+13, barW*(v.post/max), 11);
+
+    /* Werte und Delta rechts */
+    ctx.fillStyle = textCol;
+    ctx.font = '12px system-ui';
+    ctx.fillText('vor: '+v.pre, left + barW + 10, y + 7);
+    ctx.fillStyle = postCol;
+    ctx.font = 'bold 12px system-ui';
+    const arrow = dir > 0 ? '↓ besser' : (dir < 0 ? '↑ schlechter' : '= gleich');
+    /* fuer Schlafqualitaet die Pfeil-Richtung anpassen */
+    const arrowDisp = (v.higherIsBetter && dir !== 0)
+      ? (dir > 0 ? '↑ besser' : '↓ schlechter')
+      : arrow;
+    ctx.fillText('nach: '+v.post+'  '+arrowDisp, left + barW + 10, y + 19);
+    ctx.font = '14px system-ui';
   });
-  const ly = top + vals.length*row + 10;
-  ctx.fillStyle = '#0b6cf0'; ctx.fillRect(left, ly, 18, 10);
-  ctx.fillStyle = '#007a53'; ctx.fillRect(left+130, ly, 18, 10);
-  ctx.fillStyle = getComputedStyle(document.body).getPropertyValue('--text');
-  ctx.fillText('Vor Therapie', left+24, ly+10);
-  ctx.fillText('Ende', left+154, ly+10);
+
+  /* Legende unten */
+  const ly = top + vals.length*row + 12;
+  ctx.font = 'bold 12px system-ui';
+  ctx.fillStyle = '#7ba6d9'; ctx.fillRect(left, ly, 16, 10);
+  ctx.fillStyle = textCol; ctx.fillText('Vor Therapie', left+22, ly+5);
+  ctx.fillStyle = '#1b8a4f'; ctx.fillRect(left+130, ly, 16, 10);
+  ctx.fillStyle = textCol; ctx.fillText('Verbesserung', left+152, ly+5);
+  ctx.fillStyle = '#c84545'; ctx.fillRect(left+260, ly, 16, 10);
+  ctx.fillStyle = textCol; ctx.fillText('Verschlechterung', left+282, ly+5);
+  ctx.fillStyle = '#9aa1a8'; ctx.fillRect(left+410, ly, 16, 10);
+  ctx.fillStyle = textCol; ctx.fillText('Unverändert', left+432, ly+5);
+}
+
+/* Tortendiagramm: Anteile der Symptome nach Verbesserung/unveraendert/Verschlechterung */
+function drawPieChart(){
+  const c = document.getElementById('pieChart');
+  if(!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = c.clientWidth || 600;
+  const cssH = 320;
+  c.width = cssW * dpr; c.height = cssH * dpr;
+  const ctx = c.getContext('2d');
+  if(!ctx) return;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,cssW,cssH);
+
+  const p = cur();
+  let nBetter=0, nSame=0, nWorse=0;
+  symptoms.forEach(s => {
+    const pre = p.evaluierung.values?.[s];
+    const post = p.ende.values?.[s];
+    if(pre === '' || post === '' || pre === undefined || post === undefined) return;
+    const dir = changeDirection(Number(pre), Number(post), false);
+    if(dir > 0) nBetter++; else if(dir < 0) nWorse++; else nSame++;
+  });
+  /* Schlafqualitaet auch dazu */
+  if(p.evaluierung.sleepQuality !== '' && p.ende.sleepQuality !== ''){
+    const dir = changeDirection(Number(p.evaluierung.sleepQuality), Number(p.ende.sleepQuality), true);
+    if(dir > 0) nBetter++; else if(dir < 0) nWorse++; else nSame++;
+  }
+  const total = nBetter + nSame + nWorse;
+  const textCol = getComputedStyle(document.body).getPropertyValue('--text') || '#222';
+
+  if(total === 0){
+    ctx.font = '14px system-ui';
+    ctx.fillStyle = textCol;
+    ctx.textAlign = 'center';
+    ctx.fillText('Noch keine vergleichbaren Daten – beide Evaluierungen müssen ausgefüllt sein.', cssW/2, cssH/2);
+    return;
+  }
+
+  /* Tortendiagramm zeichnen */
+  const cx = 150, cy = cssH/2, radius = 110;
+  const slices = [
+    {label:'Verbesserung',     count:nBetter, color:'#1b8a4f'},
+    {label:'Unverändert',      count:nSame,   color:'#9aa1a8'},
+    {label:'Verschlechterung', count:nWorse,  color:'#c84545'}
+  ];
+  let startAngle = -Math.PI/2;
+  slices.forEach(slice => {
+    if(slice.count === 0) return;
+    const sliceAngle = (slice.count / total) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, radius, startAngle, startAngle + sliceAngle);
+    ctx.closePath();
+    ctx.fillStyle = slice.color;
+    ctx.fill();
+    /* Prozent-Label im Slice */
+    if(slice.count / total > 0.05){
+      const midAngle = startAngle + sliceAngle/2;
+      const tx = cx + Math.cos(midAngle) * radius * 0.65;
+      const ty = cy + Math.sin(midAngle) * radius * 0.65;
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 14px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(Math.round(slice.count/total*100)+'%', tx, ty);
+    }
+    startAngle += sliceAngle;
+  });
+
+  /* Legende rechts */
+  const lx = 310, ly0 = cy - 50;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.font = '14px system-ui';
+  slices.forEach((slice,i) => {
+    const ly = ly0 + i*30;
+    ctx.fillStyle = slice.color;
+    ctx.fillRect(lx, ly-8, 18, 16);
+    ctx.fillStyle = textCol;
+    ctx.fillText(`${slice.label}: ${slice.count} (${Math.round(slice.count/total*100)}%)`, lx + 26, ly);
+  });
+  /* Gesamt-Anzahl darunter */
+  ctx.fillStyle = textCol;
+  ctx.font = '12px system-ui';
+  ctx.fillText(`Gesamt ausgewertet: ${total} Parameter`, lx, ly0 + 3*30 + 10);
+}
+
+/* Gruppiertes Saeulendiagramm: Symptome vor vs. nach */
+function drawBarChart(){
+  const c = document.getElementById('barChart');
+  if(!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = c.clientWidth || 1000;
+  const cssH = 380;
+  c.width = cssW * dpr; c.height = cssH * dpr;
+  const ctx = c.getContext('2d');
+  if(!ctx) return;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,cssW,cssH);
+
+  const p = cur();
+  const vals = symptoms.map(s => ({name:s, pre:Number(p.evaluierung.values?.[s]||0), post:Number(p.ende.values?.[s]||0), higherIsBetter:false}));
+  vals.push({name:'Schlafqualität', pre:Number(p.evaluierung.sleepQuality||0), post:Number(p.ende.sleepQuality||0), higherIsBetter:true});
+
+  const textCol = getComputedStyle(document.body).getPropertyValue('--text') || '#222';
+  const padL = 30, padR = 20, padT = 20, padB = 130;
+  const chartW = cssW - padL - padR;
+  const chartH = cssH - padT - padB;
+  const max = 10;
+  const groupW = chartW / vals.length;
+  const barW = Math.min((groupW - 4) / 2, 22);
+
+  /* Y-Achsen-Linien */
+  ctx.strokeStyle = '#e0e0e0';
+  ctx.fillStyle = textCol;
+  ctx.font = '11px system-ui';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for(let v = 0; v <= 10; v += 2){
+    const y = padT + chartH - (v/max)*chartH;
+    ctx.beginPath();
+    ctx.moveTo(padL, y); ctx.lineTo(cssW - padR, y);
+    ctx.stroke();
+    ctx.fillText(String(v), padL - 4, y);
+  }
+
+  /* Saeulen */
+  vals.forEach((v,i) => {
+    const groupX = padL + i*groupW + groupW/2;
+    const dir = changeDirection(v.pre, v.post, v.higherIsBetter);
+    const postCol = changeColor(dir);
+
+    /* Vor-Saeule */
+    const preH = (v.pre/max)*chartH;
+    ctx.fillStyle = '#7ba6d9';
+    ctx.fillRect(groupX - barW - 1, padT + chartH - preH, barW, preH);
+
+    /* Nach-Saeule */
+    const postH = (v.post/max)*chartH;
+    ctx.fillStyle = postCol;
+    ctx.fillRect(groupX + 1, padT + chartH - postH, barW, postH);
+
+    /* Werte ueber Saeulen */
+    ctx.fillStyle = textCol;
+    ctx.font = 'bold 10px system-ui';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    if(v.pre > 0) ctx.fillText(String(v.pre), groupX - barW/2 - 1, padT + chartH - preH - 1);
+    if(v.post > 0) ctx.fillText(String(v.post), groupX + barW/2 + 1, padT + chartH - postH - 1);
+
+    /* Label rotiert unter Saeulen */
+    ctx.save();
+    ctx.translate(groupX, padT + chartH + 8);
+    ctx.rotate(-Math.PI/4);
+    ctx.fillStyle = textCol;
+    ctx.font = '11px system-ui';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(v.name.length > 22 ? v.name.slice(0,20)+'…' : v.name, 0, 0);
+    ctx.restore();
+  });
+
+  /* Legende oben */
+  ctx.font = 'bold 12px system-ui';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#7ba6d9'; ctx.fillRect(padL + 20, padT + 5, 14, 10);
+  ctx.fillStyle = textCol; ctx.fillText('Vor Therapie', padL + 38, padT + 10);
+  ctx.fillStyle = '#1b8a4f'; ctx.fillRect(padL + 150, padT + 5, 14, 10);
+  ctx.fillStyle = textCol; ctx.fillText('Nach – Verbesserung', padL + 168, padT + 10);
+  ctx.fillStyle = '#c84545'; ctx.fillRect(padL + 320, padT + 5, 14, 10);
+  ctx.fillStyle = textCol; ctx.fillText('Nach – Verschlechterung', padL + 338, padT + 10);
+}
+
+/* Master-Funktion: zeichnet alle drei Grafiken */
+function drawAllCharts(){
+  drawChart();
+  drawPieChart();
+  drawBarChart();
 }
 
 /* ============================================================

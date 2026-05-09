@@ -68,6 +68,19 @@ textarea{min-height:90px;resize:vertical}
 .sleepDuration input{display:none}
 .sleepDuration label:has(input:checked){background:var(--green);color:#fff;border-color:var(--green)}
 
+/* === 5-Stufen-Vergleichsskala (deutl. besser bis deutl. schlechter) === */
+.compScale{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px}
+.compOption{flex:1;min-width:140px;text-align:center;border:2px solid var(--line);border-radius:12px;padding:14px 10px;background:var(--card);cursor:pointer;font-weight:700;font-size:14px;transition:transform .1s, border-color .15s}
+.compOption input{display:none}
+.compOption span{display:block}
+.compOption:hover{transform:translateY(-1px)}
+.compOption.active{background:var(--col);color:#fff;border-color:var(--col);box-shadow:0 4px 14px #00000022}
+@media print{
+  .compScale{break-inside:avoid}
+  .compOption{border-color:#999!important;background:#fff!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .compOption.active{background:var(--col)!important;color:#fff!important;border-color:var(--col)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+
 .therapyGrid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .session{border:1px solid var(--line);border-radius:14px;padding:12px;background:var(--card)}
 .session h4{margin:0 0 8px;color:var(--brand)}
