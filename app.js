@@ -679,13 +679,22 @@ function endResultScore(result){
    - Negativer Wert = Verschlechterung, positiver = Verbesserung
    - Rueckgabewert: Score (oder null falls beide fehlen) */
 function patientImprovement(p){
-  const pre = symptoms.map(s => p.evaluierung?.values?.[s]).filter(v => v !== '' && v !== undefined && v !== null).map(Number);
-  const post = symptoms.map(s => p.ende?.values?.[s]).filter(v => v !== '' && v !== undefined && v !== null).map(Number);
+  /* Symptome paarweise vergleichen: nur wo BEIDE Werte (vor & nach) erfasst sind */
+  const pairs = [];
+  symptoms.forEach(s => {
+    const preV = p.evaluierung?.values?.[s];
+    const postV = p.ende?.values?.[s];
+    const preNum = (preV !== '' && preV !== undefined && preV !== null) ? Number(preV) : null;
+    const postNum = (postV !== '' && postV !== undefined && postV !== null) ? Number(postV) : null;
+    if(preNum !== null && postNum !== null && !isNaN(preNum) && !isNaN(postNum)){
+      pairs.push({pre: preNum, post: postNum});
+    }
+  });
 
   let symptomScore = null;
-  if(pre.length >= 3 && post.length >= 3){
-    const avgPre = pre.reduce((a,b)=>a+b,0) / pre.length;
-    const avgPost = post.reduce((a,b)=>a+b,0) / post.length;
+  if(pairs.length >= 3){
+    const avgPre = pairs.reduce((a,b) => a + b.pre, 0) / pairs.length;
+    const avgPost = pairs.reduce((a,b) => a + b.post, 0) / pairs.length;
     symptomScore = avgPre === 0 ? 0 : Math.round(((avgPre - avgPost) / avgPre) * 100);
   }
 
@@ -786,6 +795,22 @@ function diagnosisCounts(dataset){
 /* Filter Dataset auf eine bestimmte Diagnose */
 function filterByDiagnosis(dataset, diag){
   return dataset.filter(d => d.diagnoses.includes(diag));
+}
+
+/* Wendet alle aktiven Filter additiv an (UND-Verknuepfung) */
+function applyResearchFilters(dataset, filters){
+  return dataset.filter(d => {
+    /* Diagnose-Filter: wenn gesetzt, muss Patient diese Diagnose haben */
+    if(filters.diagnosis && !d.diagnoses.includes(filters.diagnosis)) return false;
+    /* Geschlecht-Filter: wenn nicht-leer, muss Patient in Liste sein */
+    if(filters.genders?.length && !filters.genders.includes(d.gender)) return false;
+    /* Alter-Filter */
+    if(filters.ageGroups?.length && !filters.ageGroups.includes(d.ageGroup)) return false;
+    /* Sitzungs-Range */
+    if(filters.minSessions != null && d.sessions < filters.minSessions) return false;
+    if(filters.maxSessions != null && d.sessions > filters.maxSessions) return false;
+    return true;
+  });
 }
 
 /* Median, Mittelwert, Stdabweichung */
@@ -934,6 +959,19 @@ function subgroupAnalysis(dataset){
 }
 
 /* === RENDER === */
+/* Forschungs-Filter: alle Filter werden additiv kombiniert (UND-Verknuepfung).
+   Leere Auswahl = kein Filter aktiv (alle Patienten).
+   diagnosis = null bedeutet "keine spezifische Diagnose ausgewaehlt" - dann werden ALLE
+   auswertbaren Patienten betrachtet. Sobald eine Diagnose gewaehlt ist, werden nur
+   Patienten mit dieser Diagnose betrachtet. */
+let researchFilters = {
+  diagnosis: null,        /* null = alle, sonst Diagnose-String */
+  genders: [],            /* leer = alle, sonst ['männlich', 'weiblich', ...] */
+  ageGroups: [],          /* leer = alle, sonst ['<30', '30-49', ...] */
+  minSessions: null,      /* null = kein Min-Filter */
+  maxSessions: null       /* null = kein Max-Filter */
+};
+/* Rueckwaertskompatibilitaet */
 let researchSelectedDiag = null;
 
 function renderResearchPanel(){
@@ -942,6 +980,10 @@ function renderResearchPanel(){
   const evaluable = dataset.length;
   const counts = diagnosisCounts(dataset);
   const sortedDiags = Object.entries(counts).sort((a,b) => b[1] - a[1]);
+
+  /* Verfuegbare Werte fuer Filter ermitteln */
+  const availGenders = [...new Set(dataset.map(d => d.gender))].filter(g => g && g !== '?');
+  const availAgeGroups = [...new Set(dataset.map(d => d.ageGroup))].filter(g => g && g !== '?').sort();
 
   let html = `<h2>📊 Forschungs-Auswertung</h2>
     <p class="smallMuted">Aggregierte Analyse über alle Patienten der Kartei. Ein Patient gilt als "auswertbar", wenn er mindestens 3 Beschwerde-Werte vor und nach Therapie sowie mindestens eine durchgeführte Sitzung hat.</p>
@@ -957,19 +999,61 @@ function renderResearchPanel(){
     return;
   }
 
-  /* Diagnose-Auswahl */
-  if(!researchSelectedDiag || !counts[researchSelectedDiag]){
-    researchSelectedDiag = sortedDiags[0]?.[0] || null;
-  }
+  /* === FILTER-SEKTION === */
+  html += `<h3 style="margin-top:24px">🔎 Filter</h3>
+    <p class="smallMuted">Mehrere Filter werden kombiniert (UND-Verknüpfung). Nicht ausgewählt = kein Filter.</p>
+    <div class="researchFilters">
 
-  html += `<h3>Diagnose wählen</h3>
-    <div class="diagSelector">
-      ${sortedDiags.map(([d,n]) => `<span class="chip ${d===researchSelectedDiag?'active':''}" data-diag="${esc(d)}">${esc(d)} <small>(${n})</small></span>`).join('')}
+      <div class="filterBlock">
+        <div class="filterLabel">Diagnose</div>
+        <div class="filterChips">
+          <span class="filterChip ${researchFilters.diagnosis === null?'active':''}" data-filter="diagnosis" data-value="">alle Diagnosen</span>
+          ${sortedDiags.map(([d,n]) => `<span class="filterChip ${d===researchFilters.diagnosis?'active':''}" data-filter="diagnosis" data-value="${esc(d)}">${esc(d)} <small>(${n})</small></span>`).join('')}
+        </div>
+      </div>
+
+      ${availGenders.length ? `<div class="filterBlock">
+        <div class="filterLabel">Geschlecht</div>
+        <div class="filterChips">
+          ${availGenders.map(g => `<span class="filterChip ${researchFilters.genders.includes(g)?'active':''}" data-filter="gender" data-value="${esc(g)}">${esc(g)}</span>`).join('')}
+        </div>
+      </div>`:''}
+
+      ${availAgeGroups.length ? `<div class="filterBlock">
+        <div class="filterLabel">Altersgruppe</div>
+        <div class="filterChips">
+          ${availAgeGroups.map(g => `<span class="filterChip ${researchFilters.ageGroups.includes(g)?'active':''}" data-filter="ageGroup" data-value="${esc(g)}">${esc(g)}</span>`).join('')}
+        </div>
+      </div>`:''}
+
+      <div class="filterBlock">
+        <div class="filterLabel">Sitzungs-Anzahl (durchgeführt)</div>
+        <div class="filterChips">
+          <span class="filterChip ${researchFilters.minSessions===null && researchFilters.maxSessions===null?'active':''}" data-filter="sessions" data-value="all">alle</span>
+          <span class="filterChip ${researchFilters.minSessions===1 && researchFilters.maxSessions===5?'active':''}" data-filter="sessions" data-value="1-5">1–5 Sitzungen</span>
+          <span class="filterChip ${researchFilters.minSessions===6 && researchFilters.maxSessions===10?'active':''}" data-filter="sessions" data-value="6-10">6–10 Sitzungen</span>
+          <span class="filterChip ${researchFilters.minSessions===11 && researchFilters.maxSessions===20?'active':''}" data-filter="sessions" data-value="11-20">11–20 Sitzungen</span>
+          <span class="filterChip ${researchFilters.minSessions===21 && researchFilters.maxSessions===null?'active':''}" data-filter="sessions" data-value="21+">21+ Sitzungen</span>
+        </div>
+      </div>
+
+      <div class="filterBlock">
+        <button class="muted" id="resetFiltersBtn" style="margin-top:4px">↺ Alle Filter zurücksetzen</button>
+      </div>
     </div>`;
 
-  if(researchSelectedDiag){
-    const sub = filterByDiagnosis(dataset, researchSelectedDiag);
-    html += renderDiagnosisAnalysis(researchSelectedDiag, sub, dataset);
+  /* Gefilterte Auswertung */
+  const filtered = applyResearchFilters(dataset, researchFilters);
+
+  html += `<h3 style="margin-top:24px">📈 Auswertung der gefilterten Patienten</h3>
+    <p class="smallMuted">${filtered.length} von ${evaluable} auswertbaren Patienten passen zu den aktuellen Filtern${researchFilters.diagnosis?` (Diagnose: <b>${esc(researchFilters.diagnosis)}</b>)`:''}.</p>`;
+
+  if(filtered.length < 1){
+    html += `<div class="researchWarn">⚠️ Keine Patienten entsprechen den gewählten Filterkriterien. Bitte Filter lockern.</div>`;
+  } else {
+    /* Bestehende Diagnosen-Analyse-Funktion wiederverwenden, aber Titel anpassen */
+    const titel = researchFilters.diagnosis || 'gefilterte Auswahl';
+    html += renderDiagnosisAnalysis(titel, filtered, dataset);
   }
 
   html += `<div style="margin-top:20px;display:flex;gap:8px;flex-wrap:wrap" class="no-print">
@@ -980,18 +1064,44 @@ function renderResearchPanel(){
 
   document.querySelector('[data-panel="forschung"]').innerHTML = html;
 
-  /* Diagnose-Wechsel */
-  document.querySelectorAll('.diagSelector .chip').forEach(c => {
+  /* Filter-Klicks */
+  document.querySelectorAll('.filterChip').forEach(c => {
     c.onclick = () => {
-      researchSelectedDiag = c.dataset.diag;
+      const f = c.dataset.filter;
+      const v = c.dataset.value;
+      if(f === 'diagnosis'){
+        researchFilters.diagnosis = (v === '' ? null : v);
+      } else if(f === 'gender'){
+        const idx = researchFilters.genders.indexOf(v);
+        if(idx >= 0) researchFilters.genders.splice(idx, 1);
+        else researchFilters.genders.push(v);
+      } else if(f === 'ageGroup'){
+        const idx = researchFilters.ageGroups.indexOf(v);
+        if(idx >= 0) researchFilters.ageGroups.splice(idx, 1);
+        else researchFilters.ageGroups.push(v);
+      } else if(f === 'sessions'){
+        if(v === 'all'){ researchFilters.minSessions = null; researchFilters.maxSessions = null; }
+        else if(v === '1-5'){ researchFilters.minSessions = 1; researchFilters.maxSessions = 5; }
+        else if(v === '6-10'){ researchFilters.minSessions = 6; researchFilters.maxSessions = 10; }
+        else if(v === '11-20'){ researchFilters.minSessions = 11; researchFilters.maxSessions = 20; }
+        else if(v === '21+'){ researchFilters.minSessions = 21; researchFilters.maxSessions = null; }
+      }
       renderResearchPanel();
     };
   });
+
+  /* Reset-Button */
+  const resetBtn = document.getElementById('resetFiltersBtn');
+  if(resetBtn) resetBtn.onclick = () => {
+    researchFilters = {diagnosis:null, genders:[], ageGroups:[], minSessions:null, maxSessions:null};
+    renderResearchPanel();
+  };
+
   /* Exporte */
   const csvBtn = document.getElementById('exportResearchCSV');
-  if(csvBtn) csvBtn.onclick = () => exportResearchCSV(dataset);
+  if(csvBtn) csvBtn.onclick = () => exportResearchCSV(filtered);
   const jsonBtn = document.getElementById('exportResearchJSON');
-  if(jsonBtn) jsonBtn.onclick = () => exportResearchJSON(dataset);
+  if(jsonBtn) jsonBtn.onclick = () => exportResearchJSON(filtered);
   const printResBtn = document.getElementById('printResearchBtn');
   if(printResBtn) printResBtn.onclick = () => doResearchPrint();
 }
@@ -1946,6 +2056,7 @@ function drawChart(){
     const y = top + i*row;
     const dir = changeDirection(v.pre, v.post, v.higherIsBetter);
     const postCol = changeColor(dir);
+    const bothEmpty = (v.pre === 0 && v.post === 0);
 
     /* Symptom-Label */
     ctx.fillStyle = textCol;
@@ -1956,26 +2067,39 @@ function drawChart(){
     ctx.fillStyle = '#e8eaed';
     ctx.fillRect(left, y, barW, 24);
 
-    /* Vor-Balken (dezent) */
-    ctx.fillStyle = '#7ba6d9';
-    ctx.fillRect(left, y, barW*(v.pre/max), 11);
+    if(bothEmpty){
+      /* Beide Werte 0 → nicht erfasst, klares Signal statt leerer grauer Balken */
+      ctx.fillStyle = '#bcbcbc';
+      ctx.font = 'italic 12px system-ui';
+      ctx.fillText('nicht erfasst (vor & nach = 0)', left + 8, y + 12);
+      ctx.font = '14px system-ui';
+    } else {
+      /* Vor-Balken (dezent blau) */
+      ctx.fillStyle = '#7ba6d9';
+      ctx.fillRect(left, y, barW*(v.pre/max), 11);
 
-    /* Nach-Balken (richtungsbasiert) */
-    ctx.fillStyle = postCol;
-    ctx.fillRect(left, y+13, barW*(v.post/max), 11);
+      /* Nach-Balken (richtungsbasiert: grün/rot/grau) */
+      ctx.fillStyle = postCol;
+      ctx.fillRect(left, y+13, barW*(v.post/max), 11);
+    }
 
     /* Werte und Delta rechts */
     ctx.fillStyle = textCol;
     ctx.font = '12px system-ui';
     ctx.fillText('vor: '+v.pre, left + barW + 10, y + 7);
-    ctx.fillStyle = postCol;
-    ctx.font = 'bold 12px system-ui';
-    const arrow = dir > 0 ? '↓ besser' : (dir < 0 ? '↑ schlechter' : '= gleich');
-    /* fuer Schlafqualitaet die Pfeil-Richtung anpassen */
-    const arrowDisp = (v.higherIsBetter && dir !== 0)
-      ? (dir > 0 ? '↑ besser' : '↓ schlechter')
-      : arrow;
-    ctx.fillText('nach: '+v.post+'  '+arrowDisp, left + barW + 10, y + 19);
+    if(bothEmpty){
+      ctx.fillStyle = '#9aa1a8';
+      ctx.font = 'italic 12px system-ui';
+      ctx.fillText('nach: '+v.post, left + barW + 10, y + 19);
+    } else {
+      ctx.fillStyle = postCol;
+      ctx.font = 'bold 12px system-ui';
+      const arrow = dir > 0 ? '↓ besser' : (dir < 0 ? '↑ schlechter' : '= gleich');
+      const arrowDisp = (v.higherIsBetter && dir !== 0)
+        ? (dir > 0 ? '↑ besser' : '↓ schlechter')
+        : arrow;
+      ctx.fillText('nach: '+v.post+'  '+arrowDisp, left + barW + 10, y + 19);
+    }
     ctx.font = '14px system-ui';
   });
 

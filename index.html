@@ -186,6 +186,33 @@ canvas{width:100%;max-height:360px}
 .diagSelector .chip{cursor:pointer}
 .diagSelector .chip.active{background:var(--brand);color:#fff;border-color:var(--brand)}
 
+/* === Forschungs-Filter === */
+.researchFilters{display:flex;flex-direction:column;gap:14px;background:var(--muted);padding:14px;border-radius:12px;border:1px solid var(--line);margin:8px 0 16px}
+.filterBlock{display:flex;flex-direction:column;gap:6px}
+.filterLabel{font-weight:700;font-size:14px;color:var(--text);opacity:.85}
+.filterChips{display:flex;flex-wrap:wrap;gap:6px}
+.filterChip{
+  display:inline-block;
+  padding:8px 14px;
+  border:2px solid var(--line);
+  border-radius:18px;
+  background:var(--card);
+  cursor:pointer;
+  font-size:14px;
+  font-weight:600;
+  user-select:none;
+  transition:transform .08s, background .12s, border-color .12s;
+}
+.filterChip:hover{transform:translateY(-1px);border-color:var(--brand)}
+.filterChip.active{background:var(--brand);color:#fff;border-color:var(--brand);box-shadow:0 3px 10px #79504433}
+.filterChip small{opacity:.85;margin-left:2px}
+@media print{
+  .researchFilters{background:#f7f3ef!important;border-color:#c8b8ad!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .filterChip{display:none}
+  .filterChip.active{display:inline-block!important;background:#795044!important;color:#fff!important;border-color:#795044!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  #resetFiltersBtn{display:none!important}
+}
+
 .researchWarn{background:#fff8dd;border:1px solid #e1c46a;border-radius:10px;padding:10px;font-size:13px;margin:10px 0}
 .researchTable{width:100%;border-collapse:collapse;margin-top:10px;font-size:14px}
 .researchTable th,.researchTable td{border-bottom:1px solid var(--line);padding:8px;text-align:left}
