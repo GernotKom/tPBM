@@ -26,8 +26,8 @@ const TABS_PATIENT = [
 const diagnoses = ['Alzheimer / Demenz','Parkinson','Schlaganfall','Depression','Angststörung','ADHS','Migräne / Kopfschmerz','Long COVID','SHT (Schädel-Hirn-Trauma)','PTBS','Schlafstörung','Multiple Sklerose','Epilepsie','Tinnitus','Burnout'];
 const symptoms = ['Erschöpfung / Fatigue','Kopfschmerzen / Migräne','Konzentrationsprobleme','Gedächtnisprobleme','Stimmungstiefs / Depression','Angst / innere Unruhe','Schlafstörungen','Brain Fog / Benommenheit','Schwindel','Zittern / Tremor'];
 /* "Soziale Isolation" entfernt */
-const mood = ['Antriebslosigkeit','Reizbarkeit','Gedrückte Stimmung','Innere Unruhe'];
-const vegetative = ['Schwindel','Tinnitus','Sehstörungen','Lichtempfindlichkeit','Geräuschempfindlichkeit','Übelkeit','Herzrasen','Kribbeln / Taubheitsgefühl','Sprachprobleme'];
+const mood = ['Antriebslosigkeit','Reizbarkeit'];
+const vegetative = ['Tinnitus','Sehstörungen','Lichtempfindlichkeit','Geräuschempfindlichkeit','Übelkeit','Herzrasen','Kribbeln / Taubheitsgefühl','Sprachprobleme'];
 const photos = ['Methylenblau','Curcumin liposomal','Riboflavin / Vitamin B2','Coenzym Q10 / Ubiquinol'];
 const supplements = ['Sonnenmoor / Trinkmoor','Shilajit / Mumijo','Omega 3','Magnesium','Vitamin D','B-Komplex','Probiotikum','Elektrolyte','Sonstiges'];
 
@@ -646,7 +646,20 @@ function maintenanceBlockHtml(p){
    Aggregiert alle Patienten der Kartei nach Diagnose
    ============================================================ */
 
-/* Mappt das endResult-Auswahlfeld auf einen Score in % */
+/* Mappt die Patienten-Selbsteinschaetzung (5-Stufen) auf einen Score in % */
+function comparisonScore(comparison){
+  if(!comparison) return null;
+  const map = {
+    'Deutlich besser':       70,
+    'Etwas besser':          30,
+    'Unverändert':            0,
+    'Etwas schlechter':     -30,
+    'Deutlich schlechter':  -70
+  };
+  return map[comparison] ?? null;
+}
+
+/* Mappt das alte endResult-Auswahlfeld auf einen Score (fuer Rueckwaertskompatibilitaet) */
 function endResultScore(result){
   if(!result) return null;
   const map = {
@@ -661,7 +674,7 @@ function endResultScore(result){
 
 /* Verbesserung eines Patienten in % berechnen - KOMBINIERT
    - 60% gewichtet: Symptom-Reduktion (vor/nach Mittelwerte der Skalen)
-   - 40% gewichtet: Therapeuten-Einschätzung (endResult-Feld)
+   - 40% gewichtet: Patienten-Selbsteinschaetzung (overallComparison) ODER altes endResult-Feld
    - Wenn nur eines vorhanden, wird das alleine genutzt
    - Negativer Wert = Verschlechterung, positiver = Verbesserung
    - Rueckgabewert: Score (oder null falls beide fehlen) */
@@ -676,13 +689,16 @@ function patientImprovement(p){
     symptomScore = avgPre === 0 ? 0 : Math.round(((avgPre - avgPost) / avgPre) * 100);
   }
 
-  const resultScore = endResultScore(p.ende?.result);
+  /* Bevorzugt overallComparison (neu), Fallback auf altes ende.result */
+  const compScore = comparisonScore(p.ende?.overallComparison);
+  const oldResultScore = endResultScore(p.ende?.result);
+  const subjectiveScore = compScore !== null ? compScore : oldResultScore;
 
-  if(symptomScore === null && resultScore === null) return null;
-  if(symptomScore === null) return resultScore;
-  if(resultScore === null) return symptomScore;
-  /* Gewichteter Mittelwert: 60% Symptom-Reduktion + 40% Therapeuten-Einschätzung */
-  return Math.round(symptomScore * 0.6 + resultScore * 0.4);
+  if(symptomScore === null && subjectiveScore === null) return null;
+  if(symptomScore === null) return subjectiveScore;
+  if(subjectiveScore === null) return symptomScore;
+  /* Gewichteter Mittelwert: 60% Symptom-Reduktion + 40% Patienten-Einschätzung */
+  return Math.round(symptomScore * 0.6 + subjectiveScore * 0.4);
 }
 
 /* Mittelwert der durchgefuehrten Sitzungs-Parameter eines Patienten */
@@ -1223,17 +1239,18 @@ function renderPanels(){
   }
 
   if(q('ende')){
-    /* Farbverlauf von Dunkelgruen ueber Hellgruen / Grau / Orange zu Dunkelrot */
+    /* Farbverlauf: dunkelgruen -> hellgruen -> orange -> hellrot -> dunkelrot
+       Mit fest berechneten hellen Hintergrund-Farben fuer alte Browser */
     const comparisonOptions = [
-      {label:'Deutlich besser',     value:'Deutlich besser',     color:'#0d6b3c'},
-      {label:'Etwas besser',         value:'Etwas besser',         color:'#5fa86c'},
-      {label:'Unverändert',          value:'Unverändert',          color:'#9aa0a6'},
-      {label:'Etwas schlechter',     value:'Etwas schlechter',     color:'#d97a3c'},
-      {label:'Deutlich schlechter',  value:'Deutlich schlechter',  color:'#a72424'}
+      {label:'Deutlich besser',     value:'Deutlich besser',     color:'#0d6b3c', soft:'#d3e4db'},
+      {label:'Etwas besser',         value:'Etwas besser',         color:'#7cc36e', soft:'#e7f4e4'},
+      {label:'Unverändert',          value:'Unverändert',          color:'#e89c3c', soft:'#faeddb'},
+      {label:'Etwas schlechter',     value:'Etwas schlechter',     color:'#dc5959', soft:'#f8e1e1'},
+      {label:'Deutlich schlechter',  value:'Deutlich schlechter',  color:'#992020', soft:'#ecd6d6'}
     ];
     const currentComp = get('ende.overallComparison') || '';
     const compButtons = comparisonOptions.map(o =>
-      `<label class="compOption ${currentComp===o.value?'active':''}" style="--col:${o.color}">
+      `<label class="compOption ${currentComp===o.value?'active':''}" style="--col:${o.color};--soft:${o.soft}">
          <input type="radio" name="ende.overallComparison" data-path="ende.overallComparison" value="${esc(o.value)}" ${currentComp===o.value?'checked':''}>
          <span>${esc(o.label)}</span>
        </label>`
@@ -1251,11 +1268,20 @@ function renderPanels(){
       </label>`;
     }).join('');
 
+    /* Default fuer ende.count: Anzahl der geplanten Sitzungen aus Therapieplanung.
+       Solange der User das Feld nicht selbst angefasst hat (_countTouched=false),
+       folgt count automatisch der planung.total. Wird in saveForm() umgeschaltet,
+       sobald der User das Feld editiert. */
+    if(!p.ende._countTouched && p.planung?.total){
+      p.ende.count = String(p.planung.total);
+    }
+
     q('ende').innerHTML = `<h2>🏁 End-Evaluierung</h2>
       <div class="grid">
         ${input('ende.count','Anzahl tatsächlich durchgeführter Sitzungen','number')}
-        <div class="field"><label>Gesamtergebnis (Therapeuten-Einschätzung)</label><select data-path="ende.result"><option></option>${['Deutliche Verbesserung','Leichte Verbesserung','Keine Veränderung','Leichte Verschlechterung','Deutliche Verschlechterung'].map(x => `<option ${get('ende.result')===x?'selected':''}>${x}</option>`).join('')}</select></div>
+        <div></div>
       </div>
+      <p class="smallMuted" style="margin:-8px 0 16px">Standard = geplante Sitzungen aus der Therapieplanung. Falls weniger durchgeführt wurden, hier anpassen.</p>
 
       <h3>🎯 Wie beurteilen Sie Ihren Gesamtzustand im Vergleich zu Therapiebeginn?</h3>
       <p class="smallMuted">Patienten-Selbsteinschätzung – bitte eine Stufe wählen.</p>
@@ -1428,6 +1454,12 @@ function wireDynamic(){
   document.querySelectorAll('input,textarea,select').forEach(el => {
     if(el.closest('#lockOverlay')) return; /* PIN-Pad nicht hier verkabeln */
     el.addEventListener('change', () => {
+      /* Wenn der User direkt am ende.count-Feld geaendert hat: Marker setzen,
+         damit count nicht mehr automatisch von planung.total ueberschrieben wird */
+      if(el.dataset.path === 'ende.count'){
+        const p = cur();
+        if(p && p.ende) p.ende._countTouched = true;
+      }
       saveForm();
       /* Felder, die strukturell etwas ändern (Sitzungs-Anzahl), brauchen ein render()
          NACH dem 'change'-Event - nie waehrend des Tippens (input-Event), sonst
@@ -1812,9 +1844,9 @@ function makeReportHtml(anon){
     <b>Therapiebeginn:</b> ${esc(p.planung.start||'-')}<br>
     <b>Akut-Sitzungen:</b> ${esc(p.planung.total||'?')} geplant · ${p.ende.count ? esc(p.ende.count)+' tatsächlich durchgeführt' : '<i>noch nicht erfasst</i>'}<br>
     ${p.maintenance && p.maintenance.enabled ? `<b>Erhaltungstherapie:</b> ${esc(p.maintenance.frequencyPerWeek||'-')}×/Woche × ${esc(p.maintenance.durationWeeks||'-')} Wochen ab ${esc(p.maintenance.start||'-')} (${maintenanceTargetCount(p.maintenance)} Sitzungen geplant)<br>` : ''}
-    <b>End-Ergebnis (Therapeut):</b> ${esc(p.ende.result||'-')}<br>
-    ${p.ende.overallComparison ? `<b>Selbsteinschätzung Patient:</b> ${esc(p.ende.overallComparison)}<br>` : ''}
-    ${p.ende.satisfaction !== '' && p.ende.satisfaction !== undefined && p.ende.satisfaction !== null ? `<b>Zufriedenheit mit der Therapie:</b> ${esc(p.ende.satisfaction)}/10<br>` : ''}
+    <b>Patienten-Einschätzung im Vergleich zu Therapiebeginn:</b> ${p.ende.overallComparison ? esc(p.ende.overallComparison) : '<i>nicht erfasst</i>'}<br>
+    <b>Patienten-Zufriedenheit:</b> ${p.ende.satisfaction !== '' && p.ende.satisfaction !== undefined && p.ende.satisfaction !== null ? esc(p.ende.satisfaction)+'/10' : '<i>nicht erfasst</i>'}
+    ${p.ende.result ? `<br><b>Frühere Therapeuten-Einschätzung:</b> ${esc(p.ende.result)}` : ''}
     </p>`;
 
   html += '<table class="evalTable"><thead><tr><th>Parameter</th><th>Vor Therapie</th><th>Ende</th><th>Bewertung</th></tr></thead><tbody>';
@@ -1850,7 +1882,8 @@ function makeReport(anon){
     `Patient: ${name}`,
     `Diagnosen: ${(p.anamnese.diagnoses||[]).join(', ')}`,
     `Sitzungen geplant: ${p.planung.total||''}`,
-    `End-Ergebnis: ${p.ende.result||''}`,
+    `Selbsteinschätzung Patient: ${p.ende.overallComparison||'-'}`,
+    `Zufriedenheit: ${p.ende.satisfaction !== '' && p.ende.satisfaction != null ? p.ende.satisfaction+'/10' : '-'}`,
     '',
     'Beschwerden / Schlafqualität:'
   ];

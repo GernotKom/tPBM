@@ -57,10 +57,35 @@ textarea{min-height:90px;resize:vertical}
 .chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:10px 13px;background:var(--muted);font-weight:800}
 .chip input{width:auto}
 
-.scale{display:flex;flex-wrap:wrap;gap:6px}
-.scale label{border:1px solid var(--line);border-radius:10px;padding:9px 11px;background:var(--card);cursor:pointer}
-.scale input{display:none}
-.scale label:has(input:checked){background:var(--blue);color:#fff}
+/* === Skala 0-10: groessere Touch-Targets fuer Tablet === */
+.scale{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0}
+.scale label{
+  flex:1 1 auto;
+  min-width:48px;
+  text-align:center;
+  border:2px solid var(--line);
+  border-radius:12px;
+  padding:14px 10px;
+  background:var(--card);
+  cursor:pointer;
+  font-size:17px;
+  font-weight:700;
+  transition:transform .08s, background .12s, border-color .12s;
+  user-select:none;
+}
+.scale input{position:absolute;opacity:0;pointer-events:none;width:0;height:0}
+.scale label:hover{transform:translateY(-1px);border-color:var(--blue)}
+.scale label:has(input:checked){background:var(--blue);color:#fff;border-color:var(--blue);font-weight:800;box-shadow:0 4px 12px #00000022}
+/* Auf Tablet-Querformat (>=900px) noch groesser */
+@media (min-width:900px){
+  .scale{gap:10px}
+  .scale label{
+    min-width:60px;
+    padding:18px 12px;
+    font-size:19px;
+    border-radius:14px;
+  }
+}
 
 /* Schlafdauer-Auswahl: groessere Buttons */
 .sleepDuration{display:flex;flex-wrap:wrap;gap:8px}
@@ -68,20 +93,46 @@ textarea{min-height:90px;resize:vertical}
 .sleepDuration input{display:none}
 .sleepDuration label:has(input:checked){background:var(--green);color:#fff;border-color:var(--green)}
 
-/* === 5-Stufen-Vergleichsskala (deutl. besser bis deutl. schlechter) === */
+/* === 5-Stufen-Vergleichsskala (deutl. besser bis deutl. schlechter) ===
+   Alle Buttons sind PERMANENT farblich untermalt (--soft als heller Hintergrund).
+   Der ausgewaehlte Button wird voll farbig (--col) + dickerer Rahmen + Schatten. */
 .compScale{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px}
-.compOption{flex:1;min-width:140px;text-align:center;border:2px solid var(--line);border-radius:12px;padding:14px 10px;background:var(--card);cursor:pointer;font-weight:700;font-size:14px;transition:transform .1s, border-color .15s, background .15s, color .15s}
+.compOption{
+  flex:1;min-width:140px;text-align:center;
+  border:2px solid var(--col);
+  border-radius:12px;padding:14px 10px;
+  background:var(--soft, #f0f0f0);
+  color:#222;
+  cursor:pointer;font-weight:700;font-size:14px;
+  transition:transform .1s, box-shadow .15s, background .15s, color .15s;
+}
 .compOption input{position:absolute;opacity:0;pointer-events:none;width:0;height:0}
 .compOption span{display:block;position:relative;z-index:1}
-.compOption:hover{transform:translateY(-1px)}
-/* Live-Feedback ohne JS: bei checked Input wird Label gefaerbt */
-.compOption:has(input:checked){background:var(--col);color:#fff;border-color:var(--col);box-shadow:0 4px 14px #00000033}
-/* Fallback fuer alte Browser: .active-Klasse vom JS gesetzt */
-.compOption.active{background:var(--col);color:#fff;border-color:var(--col);box-shadow:0 4px 14px #00000033}
+.compOption:hover{transform:translateY(-1px);filter:brightness(0.96)}
+/* Live-Feedback: ausgewaehlter Button wird voll farbig + dicker Rahmen + Schatten */
+.compOption:has(input:checked),.compOption.active{
+  background:var(--col);
+  color:#fff;
+  border-width:4px;
+  padding:12px 8px; /* padding -2 wegen breiterem Border, damit Groesse gleich bleibt */
+  box-shadow:0 6px 20px #00000044, 0 0 0 2px white inset;
+  transform:translateY(-2px);
+  font-weight:900;
+}
 @media print{
   .compScale{break-inside:avoid}
-  .compOption{border-color:#999!important;background:#fff!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .compOption:has(input:checked),.compOption.active{background:var(--col)!important;color:#fff!important;border-color:var(--col)!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .compOption{
+    border-color:var(--col)!important;
+    background:var(--soft)!important;
+    color:#222!important;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+  .compOption:has(input:checked),.compOption.active{
+    background:var(--col)!important;
+    color:#fff!important;
+    border-width:4px!important;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
 }
 
 /* === Smiley-Skala fuer Zufriedenheit (1-10) === */
@@ -91,7 +142,7 @@ textarea{min-height:90px;resize:vertical}
 .smileyScale .smiley{font-size:22px;line-height:1}
 .smileyScale .num{font-size:13px;font-weight:800}
 .smileyScale label:hover{transform:translateY(-1px)}
-.smileyScale label:has(input:checked){background:var(--brand);color:#fff;border-color:var(--brand);box-shadow:0 4px 14px #00000022}
+.smileyScale label:has(input:checked){background:var(--brand);color:#fff;border-color:var(--brand);box-shadow:0 4px 14px #00000022;border-width:3px;padding:9px 5px}
 @media print{
   .smileyScale label{border-color:#999!important;background:#fff!important;color:#000!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .smileyScale label:has(input:checked){background:#795044!important;color:#fff!important;border-color:#795044!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
