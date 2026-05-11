@@ -555,7 +555,10 @@ function updateSessionCountFromField(){
 }
 function sessionHtml(i){
   const s = cur().planung.sessions[i];
-  return `<div class="session"><h4>Sitzung ${i+1}</h4>
+  /* Durchgefuehrt = Datum UND mindestens Hz eingetragen */
+  const done = !!(s.date && s.hz);
+  const cls = done ? 'session session-done' : 'session session-open';
+  return `<div class="${cls}"><h4>Sitzung ${i+1} ${done?'<span class="sessionTag tag-done">✓ durchgeführt</span>':'<span class="sessionTag tag-open">offen</span>'}</h4>
     <div class="miniGrid">
       <div class="field"><label>Datum</label><input type="date" data-session="${i}" data-key="date" value="${esc(s.date)}"></div>
       <div class="field"><label>Frequenz Hz</label><input data-session="${i}" data-key="hz" value="${esc(s.hz)}"></div>
@@ -569,7 +572,9 @@ function sessionHtml(i){
 /* === ERHALTUNGS-SITZUNGEN UI === */
 function maintenanceSessionHtml(i){
   const s = cur().maintenance.sessions[i];
-  return `<div class="session maintenance-session"><h4>Erhaltung #${i+1}</h4>
+  const done = !!(s.date && s.hz);
+  const cls = done ? 'session maintenance-session session-done' : 'session maintenance-session session-open';
+  return `<div class="${cls}"><h4>Erhaltung #${i+1} ${done?'<span class="sessionTag tag-done">✓ durchgeführt</span>':'<span class="sessionTag tag-open">offen</span>'}</h4>
     <div class="miniGrid">
       <div class="field"><label>Datum</label><input type="date" data-msession="${i}" data-key="date" value="${esc(s.date)}"></div>
       <div class="field"><label>Frequenz Hz</label><input data-msession="${i}" data-key="hz" value="${esc(s.hz)}"></div>
@@ -1317,7 +1322,9 @@ function renderPanels(){
 
   if(q('anamnese')){
     q('anamnese').innerHTML = `<h2>📝 Anamnese</h2>
-      <h3>Diagnosen / Vorerkrankungen</h3>${chips('anamnese.diagnoses',diagnoses)}
+      <h3>Diagnostizierte Vorerkrankungen <span class="smallMuted" style="font-weight:400; font-size:14px">– vom Arzt einzuschätzen</span></h3>
+      <p class="smallMuted" style="margin:-4px 0 8px">Nur durch behandelnde Ärztin/Arzt vergebene Diagnosen ankreuzen. Diese fließen optional in die statistische Forschungs-Auswertung ein (siehe Filter dort).</p>
+      ${chips('anamnese.diagnoses',diagnoses)}
       ${textarea('anamnese.otherDiag','Sonstige Diagnosen')}
       ${textarea('anamnese.meds','Aktuelle Medikation')}
       ${textarea('anamnese.notes','Anamnese-Anmerkungen')}`;
@@ -1560,7 +1567,66 @@ function saveForm(){
   applyGlobalSettings(); /* Praxisname etc. live updaten */
 }
 
+/* Aktualisiert die CSS-Klassen aller Sitzungen (planung + maintenance)
+   live - ohne kompletten Re-Render. Genutzt waehrend der Eingabe in
+   Sitzungs-Felder, damit der Cursor bleibt und die Farbe sofort wechselt. */
+function updateSessionStatusClasses(){
+  const p = cur();
+  if(!p) return;
+  /* Therapie-Sitzungen */
+  document.querySelectorAll('.session:not(.maintenance-session)').forEach((el, i) => {
+    const s = p.planung?.sessions?.[i];
+    if(!s) return;
+    const done = !!(s.date && s.hz);
+    el.classList.toggle('session-done', done);
+    el.classList.toggle('session-open', !done);
+    const tag = el.querySelector('.sessionTag');
+    if(tag){
+      tag.className = 'sessionTag ' + (done ? 'tag-done' : 'tag-open');
+      tag.textContent = done ? '✓ durchgeführt' : 'offen';
+    }
+  });
+  /* Erhaltungs-Sitzungen */
+  document.querySelectorAll('.session.maintenance-session').forEach((el, i) => {
+    const s = p.maintenance?.sessions?.[i];
+    if(!s) return;
+    const done = !!(s.date && s.hz);
+    el.classList.toggle('session-done', done);
+    el.classList.toggle('session-open', !done);
+    const tag = el.querySelector('.sessionTag');
+    if(tag){
+      tag.className = 'sessionTag ' + (done ? 'tag-done' : 'tag-open');
+      tag.textContent = done ? '✓ durchgeführt' : 'offen';
+    }
+  });
+}
+
 function wireDynamic(){
+  /* Re-Klick auf aktiven Skala-Radio = Abwahl (Wert leeren).
+     Trick: Vor dem Click merken wir, ob der Radio bereits checked war.
+     Da Browser das `checked` schon beim Click selbst setzen, fragen wir
+     den Zustand BEIM pointerdown ab (vor dem Click). */
+  document.querySelectorAll('.scale label').forEach(label => {
+    const radio = label.querySelector('input[type="radio"]');
+    if(!radio) return;
+    let wasCheckedBeforeClick = false;
+    /* pointerdown feuert vor click und tap, auf allen Geraeten */
+    label.addEventListener('pointerdown', () => {
+      wasCheckedBeforeClick = radio.checked;
+    });
+    label.addEventListener('click', e => {
+      if(wasCheckedBeforeClick){
+        /* War schon ausgewaehlt -> abwaehlen */
+        e.preventDefault();
+        radio.checked = false;
+        if(radio.dataset.path) set(radio.dataset.path, '');
+        persist();
+        /* CSS :has(input:checked) Selector aktualisiert automatisch das Aussehen */
+      }
+      wasCheckedBeforeClick = false;
+    });
+  });
+
   document.querySelectorAll('input,textarea,select').forEach(el => {
     if(el.closest('#lockOverlay')) return; /* PIN-Pad nicht hier verkabeln */
     el.addEventListener('change', () => {
@@ -1591,6 +1657,12 @@ function wireDynamic(){
           persist();
           render();
         }
+      }
+      /* Sitzungs-Status (durchgefuehrt/offen) live aktualisieren ohne kompletten Re-Render.
+         Wir aendern nur die CSS-Klassen + die Status-Tags - kein render() noetig,
+         damit der Cursor im aktuellen Feld bleibt. */
+      if(el.dataset.session !== undefined || el.dataset.msession !== undefined){
+        updateSessionStatusClasses();
       }
     });
   });
