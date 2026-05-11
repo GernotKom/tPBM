@@ -5,6 +5,8 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
+const APP_VERSION = '1.16';
+const APP_RELEASE_DATE = '2026-05-09';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
 const TABS_ALL = [
@@ -23,7 +25,7 @@ const TABS_PATIENT = [
 ];
 
 /* ---------- Datenlisten ---------- */
-const diagnoses = ['Alzheimer / Demenz','Parkinson','Schlaganfall','Depression','Angststörung','ADHS','Migräne / Kopfschmerz','Long COVID','SHT (Schädel-Hirn-Trauma)','PTBS','Schlafstörung','Multiple Sklerose','Epilepsie','Tinnitus','Burnout'];
+const diagnoses = ['Alzheimer / Demenz','Parkinson','Schlaganfall','Depression','Angststörung','ADHS','Migräne / Kopfschmerz','Long COVID','SHT (Schädel-Hirn-Trauma)','PTBS','Schlafstörung','Multiple Sklerose','Epilepsie','Tinnitus','Burnout','Borreliose'];
 const symptoms = ['Erschöpfung / Fatigue','Kopfschmerzen / Migräne','Konzentrationsprobleme','Gedächtnisprobleme','Stimmungstiefs / Depression','Angst / innere Unruhe','Schlafstörungen','Brain Fog / Benommenheit','Schwindel','Zittern / Tremor'];
 /* "Soziale Isolation" entfernt */
 const mood = ['Antriebslosigkeit','Reizbarkeit'];
@@ -230,7 +232,7 @@ function blankPatient(){
   };
 }
 function makeSessions(n){
-  return Array.from({length:Number(n)||0}, (_,i) => ({nr:i+1,date:'',hz:'',intensity:'',duration:'',note:''}));
+  return Array.from({length:Number(n)||0}, (_,i) => ({nr:i+1,date:'',hz:'',intensity:'',duration:'',note:'',done:false}));
 }
 function ensureShape(){
   const p = cur();
@@ -264,9 +266,9 @@ function adjustSessions(){
   const p = cur();
   if(!p) return;
   const n = Math.max(0, Math.min(40, Number(p.planung.total)||0));
-  while(p.planung.sessions.length < n) p.planung.sessions.push({nr:p.planung.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:''});
+  while(p.planung.sessions.length < n) p.planung.sessions.push({nr:p.planung.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:'',done:false});
   if(p.planung.sessions.length > n) p.planung.sessions = p.planung.sessions.slice(0,n);
-  p.planung.sessions.forEach((s,i) => s.nr = i+1);
+  p.planung.sessions.forEach((s,i) => { s.nr = i+1; if(s.done === undefined) s.done = false; });
 }
 
 /* === ERHALTUNGS-SITZUNGEN ===
@@ -283,9 +285,9 @@ function adjustMaintenanceSessions(){
   if(!p || !p.maintenance) return;
   const m = p.maintenance;
   const n = maintenanceTargetCount(m);
-  while(m.sessions.length < n) m.sessions.push({nr:m.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:''});
+  while(m.sessions.length < n) m.sessions.push({nr:m.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:'',done:false});
   if(m.sessions.length > n) m.sessions = m.sessions.slice(0,n);
-  m.sessions.forEach((s,i) => s.nr = i+1);
+  m.sessions.forEach((s,i) => { s.nr = i+1; if(s.done === undefined) s.done = false; });
 }
 
 /* Verteilt Sitzungs-Daten gleichmaessig in den Wochen ab Startdatum.
@@ -555,10 +557,16 @@ function updateSessionCountFromField(){
 }
 function sessionHtml(i){
   const s = cur().planung.sessions[i];
-  /* Durchgefuehrt = Datum UND mindestens Hz eingetragen */
-  const done = !!(s.date && s.hz);
+  const done = !!s.done;
   const cls = done ? 'session session-done' : 'session session-open';
-  return `<div class="${cls}"><h4>Sitzung ${i+1} ${done?'<span class="sessionTag tag-done">✓ durchgeführt</span>':'<span class="sessionTag tag-open">offen</span>'}</h4>
+  return `<div class="${cls}">
+    <div class="sessionHeader">
+      <h4>Sitzung ${i+1}</h4>
+      <label class="sessionDoneToggle">
+        <input type="checkbox" data-session="${i}" data-key="done" ${done?'checked':''}>
+        <span>${done?'✓ durchgeführt':'als durchgeführt markieren'}</span>
+      </label>
+    </div>
     <div class="miniGrid">
       <div class="field"><label>Datum</label><input type="date" data-session="${i}" data-key="date" value="${esc(s.date)}"></div>
       <div class="field"><label>Frequenz Hz</label><input data-session="${i}" data-key="hz" value="${esc(s.hz)}"></div>
@@ -572,9 +580,16 @@ function sessionHtml(i){
 /* === ERHALTUNGS-SITZUNGEN UI === */
 function maintenanceSessionHtml(i){
   const s = cur().maintenance.sessions[i];
-  const done = !!(s.date && s.hz);
+  const done = !!s.done;
   const cls = done ? 'session maintenance-session session-done' : 'session maintenance-session session-open';
-  return `<div class="${cls}"><h4>Erhaltung #${i+1} ${done?'<span class="sessionTag tag-done">✓ durchgeführt</span>':'<span class="sessionTag tag-open">offen</span>'}</h4>
+  return `<div class="${cls}">
+    <div class="sessionHeader">
+      <h4>Erhaltung #${i+1}</h4>
+      <label class="sessionDoneToggle">
+        <input type="checkbox" data-msession="${i}" data-key="done" ${done?'checked':''}>
+        <span>${done?'✓ durchgeführt':'als durchgeführt markieren'}</span>
+      </label>
+    </div>
     <div class="miniGrid">
       <div class="field"><label>Datum</label><input type="date" data-msession="${i}" data-key="date" value="${esc(s.date)}"></div>
       <div class="field"><label>Frequenz Hz</label><input data-msession="${i}" data-key="hz" value="${esc(s.hz)}"></div>
@@ -1482,6 +1497,27 @@ function renderPanels(){
         <b>Auf dem Tablet:</b> Beim ersten Mal fragt Chrome, ob mehrere Dateien heruntergeladen werden dürfen – das einmalig erlauben.
         <br><br>
         <b>Wichtig:</b> Das ersetzt kein wöchentliches Sichern in die Cloud / auf USB. Es ist eine zusätzliche Absicherung.
+      </div>
+
+      <h3>Über diese App</h3>
+      <div class="appAbout">
+        <p class="versionLine">
+          <b>WeberBrain® Evaluation</b><br>
+          Version ${APP_VERSION} &nbsp;·&nbsp; Release: ${APP_RELEASE_DATE}
+        </p>
+        <p class="smallMuted" style="margin-top:14px">
+          <b>Impressum / Copyright</b><br>
+          © ${new Date().getFullYear()} – Diese Anwendung wurde als individuelle Praxis-Lösung entwickelt.
+          Sie ist nicht ein offizielles Produkt der Weber Medical GmbH und steht in keinem geschäftlichen
+          Zusammenhang mit dem Hersteller des WeberBrain®-Systems.
+          „WeberBrain®" ist eine eingetragene Marke der Weber Medical GmbH.
+          <br><br>
+          <b>Haftungshinweis:</b> Diese App dient ausschließlich der internen Dokumentation und Verlaufs-Erfassung
+          durch geschultes Fachpersonal. Sie ersetzt keine medizinische Diagnose oder Behandlung.
+          Alle eingegebenen Daten verbleiben lokal im Browser des verwendeten Endgerätes – es findet
+          keine Übertragung an externe Server statt. Für den Datenschutz nach DSGVO verantwortlich
+          ist der Betreiber/die Betreiberin der jeweiligen Praxis.
+        </p>
       </div>`;
 
     /* __settings-Werte aus db.settings hydrieren */
@@ -1552,12 +1588,24 @@ function saveForm(){
   });
   /* Sitzungen */
   document.querySelectorAll('[data-session]').forEach(el => {
-    p.planung.sessions[+el.dataset.session][el.dataset.key] = el.value;
+    const key = el.dataset.key;
+    const idx = +el.dataset.session;
+    if(key === 'done'){
+      p.planung.sessions[idx][key] = el.checked;
+    } else {
+      p.planung.sessions[idx][key] = el.value;
+    }
   });
   /* Erhaltungs-Sitzungen */
   document.querySelectorAll('[data-msession]').forEach(el => {
-    if(p.maintenance && p.maintenance.sessions[+el.dataset.msession]){
-      p.maintenance.sessions[+el.dataset.msession][el.dataset.key] = el.value;
+    const key = el.dataset.key;
+    const idx = +el.dataset.msession;
+    if(p.maintenance && p.maintenance.sessions[idx]){
+      if(key === 'done'){
+        p.maintenance.sessions[idx][key] = el.checked;
+      } else {
+        p.maintenance.sessions[idx][key] = el.value;
+      }
     }
   });
   adjustSessions();
@@ -1568,8 +1616,8 @@ function saveForm(){
 }
 
 /* Aktualisiert die CSS-Klassen aller Sitzungen (planung + maintenance)
-   live - ohne kompletten Re-Render. Genutzt waehrend der Eingabe in
-   Sitzungs-Felder, damit der Cursor bleibt und die Farbe sofort wechselt. */
+   live - ohne kompletten Re-Render. Genutzt wenn die done-Checkbox geklickt
+   wird, damit Farbe und Label sofort wechseln. */
 function updateSessionStatusClasses(){
   const p = cur();
   if(!p) return;
@@ -1577,27 +1625,21 @@ function updateSessionStatusClasses(){
   document.querySelectorAll('.session:not(.maintenance-session)').forEach((el, i) => {
     const s = p.planung?.sessions?.[i];
     if(!s) return;
-    const done = !!(s.date && s.hz);
+    const done = !!s.done;
     el.classList.toggle('session-done', done);
     el.classList.toggle('session-open', !done);
-    const tag = el.querySelector('.sessionTag');
-    if(tag){
-      tag.className = 'sessionTag ' + (done ? 'tag-done' : 'tag-open');
-      tag.textContent = done ? '✓ durchgeführt' : 'offen';
-    }
+    const tagSpan = el.querySelector('.sessionDoneToggle > span');
+    if(tagSpan) tagSpan.textContent = done ? '✓ durchgeführt' : 'als durchgeführt markieren';
   });
   /* Erhaltungs-Sitzungen */
   document.querySelectorAll('.session.maintenance-session').forEach((el, i) => {
     const s = p.maintenance?.sessions?.[i];
     if(!s) return;
-    const done = !!(s.date && s.hz);
+    const done = !!s.done;
     el.classList.toggle('session-done', done);
     el.classList.toggle('session-open', !done);
-    const tag = el.querySelector('.sessionTag');
-    if(tag){
-      tag.className = 'sessionTag ' + (done ? 'tag-done' : 'tag-open');
-      tag.textContent = done ? '✓ durchgeführt' : 'offen';
-    }
+    const tagSpan = el.querySelector('.sessionDoneToggle > span');
+    if(tagSpan) tagSpan.textContent = done ? '✓ durchgeführt' : 'als durchgeführt markieren';
   });
 }
 
@@ -1658,10 +1700,9 @@ function wireDynamic(){
           render();
         }
       }
-      /* Sitzungs-Status (durchgefuehrt/offen) live aktualisieren ohne kompletten Re-Render.
-         Wir aendern nur die CSS-Klassen + die Status-Tags - kein render() noetig,
-         damit der Cursor im aktuellen Feld bleibt. */
-      if(el.dataset.session !== undefined || el.dataset.msession !== undefined){
+      /* Sitzungs-Status nur aktualisieren, wenn die done-Checkbox geklickt wurde.
+         (Datum/Hz/Intensitaet etc. aendern den Status NICHT mehr - nur der Haken.) */
+      if((el.dataset.session !== undefined || el.dataset.msession !== undefined) && el.dataset.key === 'done'){
         updateSessionStatusClasses();
       }
     });
