@@ -212,6 +212,21 @@ textarea{min-height:90px;resize:vertical}
   color:#555;
 }
 .appAbout p.smallMuted b{color:var(--brand)}
+
+/* === Auto-Backup: Ordner-Auswahl-Zeile === */
+.folderRow{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  background:var(--muted);
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:10px 12px;
+  margin-top:4px;
+}
+.folderStatus{flex:1;min-width:200px;font-size:13px}
+.folderActions{display:flex;gap:6px;flex-wrap:wrap}
+.folderActions button{font-size:13px;padding:6px 12px}
+.folderHint{font-size:12px;color:#a07300;background:#fff8dd;border:1px dashed #e1c46a;padding:8px 10px;border-radius:8px;margin-top:4px}
+.folderHint:empty{display:none}
 .ok{background:#e5f6ed;border-color:#8dc9a9}
 .hidden{display:none!important}
 
@@ -420,7 +435,6 @@ canvas{width:100%;max-height:360px}
     </div>
   </div>
   <div class="topBtns">
-    <button class="primary" id="newPatientBtn">+ Neuer Patient</button>
     <button class="muted" id="exportBtn">💾 Kartei-Sicherung</button>
     <button class="muted" id="printBtn">Drucken</button>
     <button class="danger" id="lockBtn">🔒 Sperren</button>
@@ -446,6 +460,7 @@ canvas{width:100%;max-height:360px}
     <div id="patientList" class="patientList"></div>
     <hr>
     <div class="sidebarBtns">
+      <button class="primary" id="newPatientSidebarBtn">+ Neuer Patient</button>
       <button class="muted" id="exportSinglePatientBtn">📤 Diesen Patienten exportieren</button>
       <button class="muted" id="importSidebarBtn">📥 Patient/Kartei importieren</button>
       <input id="importSidebarFile" type="file" accept="application/json" class="hidden">

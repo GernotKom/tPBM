@@ -5,8 +5,8 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
-const APP_VERSION = '1.16';
-const APP_RELEASE_DATE = '2026-05-09';
+const APP_VERSION = '1.18';
+const APP_RELEASE_DATE = '2026-05-10';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
 const TABS_ALL = [
@@ -136,15 +136,21 @@ function dataHash(){
 }
 
 function scheduleAutoBackup(){
-  /* Wenn deaktiviert: laufenden Timer abbrechen und nicht neu starten */
+  /* _hasUnsavedChanges immer pflegen (auch bei deaktiviertem autoBackup),
+     damit der Lock-Trigger entscheiden kann ob es etwas zu sichern gibt */
+  const currentHash = dataHash();
+  if(currentHash !== _lastBackupHash) _hasUnsavedChanges = true;
+
+  /* Wenn Auto-Backup deaktiviert: keinen Timer starten - return */
   if(!db.settings || !db.settings.autoBackup){
     clearTimeout(_autoBackupTimer);
     return;
   }
-  /* Nur planen, wenn sich was geaendert hat seit letztem Backup */
-  const currentHash = dataHash();
   if(currentHash === _lastBackupHash) return;
-  _hasUnsavedChanges = true;
+
+  /* Intervall aus Settings (Minuten), Default 3 */
+  const minutes = Number(db.settings.autoBackupInterval) || 3;
+  const intervalMs = minutes * 60 * 1000;
 
   clearTimeout(_autoBackupTimer);
   _autoBackupTimer = setTimeout(() => {
@@ -153,13 +159,39 @@ function scheduleAutoBackup(){
     if(_hasUnsavedChanges && db.settings.autoBackup){
       doAutoBackup();
     }
-  }, 3 * 60 * 1000); /* 3 Minuten */
+  }, intervalMs);
 }
 
-function doAutoBackup(){
+async function doAutoBackup(){
   try {
     const filename = 'weberbrain_backup_' + today() + '.json';
-    const blob = new Blob([JSON.stringify(db, null, 2)], {type:'application/json'});
+    const json = JSON.stringify(db, null, 2);
+    /* Wenn ein Ordner-Handle (File System Access API) gewaehlt wurde,
+       direkt dorthin schreiben - sonst Download-Fallback */
+    const handle = await getStoredFolderHandle();
+    if(handle){
+      try {
+        /* Permission re-pruefen */
+        let perm = await handle.queryPermission({mode:'readwrite'});
+        if(perm !== 'granted'){
+          perm = await handle.requestPermission({mode:'readwrite'});
+        }
+        if(perm === 'granted'){
+          const fileHandle = await handle.getFileHandle(filename, {create:true});
+          const writable = await fileHandle.createWritable();
+          await writable.write(json);
+          await writable.close();
+          _lastBackupHash = dataHash();
+          _hasUnsavedChanges = false;
+          showToast('💾 Backup in gewählten Ordner gespeichert');
+          return;
+        }
+      } catch(e){
+        console.warn('Auto-Backup in Ordner fehlgeschlagen, Fallback auf Download:', e);
+      }
+    }
+    /* Standard-Fallback: Download */
+    const blob = new Blob([json], {type:'application/json'});
     dl(blob, filename);
     _lastBackupHash = dataHash();
     _hasUnsavedChanges = false;
@@ -167,6 +199,58 @@ function doAutoBackup(){
   } catch(e){
     console.error('Auto-Backup fehlgeschlagen:', e);
   }
+}
+
+/* ===== File System Access API: Ordner-Handle in IndexedDB persistieren =====
+   FSAA erlaubt keine Pfad-Strings, nur Handles. Diese muessen in IndexedDB
+   gespeichert werden, damit die App auch nach Neustart auf den Ordner zugreifen kann.
+   Auf Mobile/Android-Chrome ist die API NICHT verfuegbar - dann geben wir null zurueck. */
+const FSA_DB_NAME = 'weberbrain_fsa';
+const FSA_STORE = 'handles';
+const FSA_KEY = 'autoBackupFolder';
+function _openFsaDb(){
+  return new Promise((resolve, reject) => {
+    if(!('indexedDB' in window)){ reject(new Error('IndexedDB nicht verfügbar')); return; }
+    const req = indexedDB.open(FSA_DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(FSA_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function storeFolderHandle(handle){
+  if(!handle) return;
+  const db_ = await _openFsaDb();
+  await new Promise((resolve, reject) => {
+    const tx = db_.transaction(FSA_STORE, 'readwrite');
+    tx.objectStore(FSA_STORE).put(handle, FSA_KEY);
+    tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+  });
+}
+async function getStoredFolderHandle(){
+  if(!('indexedDB' in window)) return null;
+  try {
+    const db_ = await _openFsaDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db_.transaction(FSA_STORE, 'readonly');
+      const req = tx.objectStore(FSA_STORE).get(FSA_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch(e){ return null; }
+}
+async function clearStoredFolderHandle(){
+  try {
+    const db_ = await _openFsaDb();
+    await new Promise((resolve, reject) => {
+      const tx = db_.transaction(FSA_STORE, 'readwrite');
+      tx.objectStore(FSA_STORE).delete(FSA_KEY);
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+  } catch(e){}
+}
+/* Erkennt, ob die File System Access API verfuegbar ist (Desktop-Chrome/Edge) */
+function isFolderPickerSupported(){
+  return typeof window.showDirectoryPicker === 'function';
 }
 
 /* Manuell sofort backupen (z.B. ueber Button) */
@@ -186,6 +270,13 @@ function ensureSettings(){
   if(!db.settings.pinPatient) db.settings.pinPatient = '0000';
   /* Auto-Backup: Standard AUS - User muss bewusst aktivieren */
   if(db.settings.autoBackup === undefined) db.settings.autoBackup = false;
+  /* Intervall in Minuten: 3, 6, 9, 12, 15, 20, 30 */
+  if(db.settings.autoBackupInterval === undefined) db.settings.autoBackupInterval = 3;
+  /* Zusaetzlich beim Sperren der App backupen (separater Switch) */
+  if(db.settings.autoBackupOnLock === undefined) db.settings.autoBackupOnLock = false;
+  /* Ordner-Pfad fuer Auto-Backup (informell - bei File System Access API
+     wird das Handle in IndexedDB gespeichert, nicht hier; hier nur der Anzeige-Name) */
+  if(db.settings.autoBackupFolderName === undefined) db.settings.autoBackupFolderName = '';
 }
 ensureSettings();
 /* Migration: Alte Patienten ohne maintenance-Feld nachruesten */
@@ -436,10 +527,13 @@ function render(){
   /* Sidebar im Patientenmodus ausblenden */
   document.getElementById('sidebar').style.display = userMode === 'patient' ? 'none' : '';
   document.getElementById('mainWrap').style.gridTemplateColumns = userMode === 'patient' ? '1fr' : '320px 1fr';
-  /* "Neuer Patient", "Export", "Drucken", "Löschen" für Patienten ausblenden */
-  document.getElementById('newPatientBtn').style.display = userMode === 'patient' ? 'none' : '';
+  /* "Export", "Drucken" für Patienten ausblenden */
   document.getElementById('exportBtn').style.display = userMode === 'patient' ? 'none' : '';
   document.getElementById('printBtn').style.display = userMode === 'patient' ? 'none' : '';
+
+  /* Neuer-Patient-Btn in Sidebar nur sichtbar im Stammdaten-Reiter */
+  const newSb = document.getElementById('newPatientSidebarBtn');
+  if(newSb) newSb.style.display = (activeTab === 'stamm') ? '' : 'none';
 
   renderList();
   document.getElementById('empty').classList.toggle('hidden', !!cur());
@@ -1488,13 +1582,45 @@ function renderPanels(){
       <label class="toggleSwitch" style="margin:8px 0">
         <input type="checkbox" id="autoBackupToggle" ${db.settings.autoBackup?'checked':''}>
         <span class="slider"></span>
-        <span class="toggleLabel">${db.settings.autoBackup?'aktiviert (3 Min Inaktivität)':'deaktiviert'}</span>
+        <span class="toggleLabel">${db.settings.autoBackup?'aktiviert':'deaktiviert'}</span>
       </label>
+
+      <div class="grid" style="margin-top:10px">
+        <div class="field">
+          <label for="autoBackupIntervalSelect">Intervall nach letzter Eingabe</label>
+          <select id="autoBackupIntervalSelect">
+            ${[3,6,9,12,15,20,30].map(m => `<option value="${m}" ${Number(db.settings.autoBackupInterval)===m?'selected':''}>nach ${m} Minuten Inaktivität</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label>Backup beim Sperren der App</label>
+          <label class="toggleSwitch">
+            <input type="checkbox" id="autoBackupOnLockToggle" ${db.settings.autoBackupOnLock?'checked':''}>
+            <span class="slider"></span>
+            <span class="toggleLabel">${db.settings.autoBackupOnLock?'beim Sperren wird gesichert':'kein Backup beim Sperren'}</span>
+          </label>
+        </div>
+      </div>
+
+      <h4 style="margin-top:14px;margin-bottom:6px">Speicherort</h4>
+      <div class="folderRow">
+        <div class="folderStatus">
+          ${db.settings.autoBackupFolderName ? `<b>📂 Gewählter Ordner:</b> ${esc(db.settings.autoBackupFolderName)}` : '<span class="smallMuted">Standard: <i>Downloads</i>-Ordner des Browsers</span>'}
+        </div>
+        <div class="folderActions">
+          <button class="muted" id="pickFolderBtn">📂 Ordner wählen…</button>
+          ${db.settings.autoBackupFolderName ? '<button class="muted" id="clearFolderBtn">↺ zurücksetzen</button>' : ''}
+        </div>
+      </div>
+      <p class="smallMuted folderHint" id="folderHint" style="margin-top:6px"></p>
+
       <div class="notice">
         <b>So funktioniert das Auto-Backup:</b><br>
-        Wenn aktiviert, wird 3 Minuten nach der letzten Eingabe automatisch eine Sicherungsdatei in den <i>Downloads</i>-Ordner geschrieben. Pro Tag eine Datei (<code>weberbrain_backup_${today()}.json</code>) – ältere Backups bleiben erhalten, der heutige Tag wird ggf. überschrieben.
+        Wenn aktiviert, wird nach <b>${Number(db.settings.autoBackupInterval)||3} Minuten Inaktivität</b> automatisch eine Sicherungsdatei geschrieben. Pro Tag eine Datei (<code>weberbrain_backup_${today()}.json</code>) – ältere Backups bleiben erhalten, der heutige Tag wird ggf. überschrieben.
         <br><br>
-        <b>Auf dem Tablet:</b> Beim ersten Mal fragt Chrome, ob mehrere Dateien heruntergeladen werden dürfen – das einmalig erlauben.
+        <b>Auf dem Tablet (Android-Chrome):</b> Eine direkte Ordner-Auswahl ist technisch nicht möglich. Die Datei landet immer im <i>Downloads</i>-Ordner. Beim ersten Mal fragt Chrome, ob mehrere Dateien heruntergeladen werden dürfen – das einmalig erlauben.
+        <br><br>
+        <b>Auf PC (Chrome/Edge):</b> Sie können einen festen Ordner wählen (z.B. einen OneDrive- oder Dropbox-Ordner). Die App schreibt die Backups dann direkt dorthin, ohne dass jedes Mal ein Dialog erscheint.
         <br><br>
         <b>Wichtig:</b> Das ersetzt kein wöchentliches Sichern in die Cloud / auf USB. Es ist eine zusätzliche Absicherung.
       </div>
@@ -1507,10 +1633,14 @@ function renderPanels(){
         </p>
         <p class="smallMuted" style="margin-top:14px">
           <b>Impressum / Copyright</b><br>
-          © ${new Date().getFullYear()} – Diese Anwendung wurde als individuelle Praxis-Lösung entwickelt.
-          Sie ist nicht ein offizielles Produkt der Weber Medical GmbH und steht in keinem geschäftlichen
+          © ${new Date().getFullYear()} <b>Dr. Gernot Kommetter, MSc</b><br>
+          Diese Anwendung wurde als individuelle Praxis-Lösung entwickelt und ist Eigentum
+          des oben genannten Autors. Jede Weitergabe, Veröffentlichung oder kommerzielle
+          Nutzung bedarf der ausdrücklichen schriftlichen Zustimmung.
+          <br><br>
+          „WeberBrain®" ist eine eingetragene Marke der Weber Medical GmbH. Diese App ist
+          kein offizielles Produkt der Weber Medical GmbH und steht in keinem geschäftlichen
           Zusammenhang mit dem Hersteller des WeberBrain®-Systems.
-          „WeberBrain®" ist eine eingetragene Marke der Weber Medical GmbH.
           <br><br>
           <b>Haftungshinweis:</b> Diese App dient ausschließlich der internen Dokumentation und Verlaufs-Erfassung
           durch geschultes Fachpersonal. Sie ersetzt keine medizinische Diagnose oder Behandlung.
@@ -1852,6 +1982,74 @@ function wireDynamic(){
         clearTimeout(_autoBackupTimer);
         showToast('Auto-Backup deaktiviert');
       }
+      render();
+    };
+  }
+
+  /* Auto-Backup Intervall-Dropdown */
+  const intSel = document.getElementById('autoBackupIntervalSelect');
+  if(intSel){
+    intSel.onchange = () => {
+      const m = Number(intSel.value) || 3;
+      db.settings.autoBackupInterval = m;
+      persist();
+      /* Falls bereits ein Timer laeuft, neu planen mit dem neuen Intervall */
+      if(db.settings.autoBackup){
+        clearTimeout(_autoBackupTimer);
+        scheduleAutoBackup();
+      }
+      showToast('Intervall: nach ' + m + ' Min Inaktivität');
+      render();
+    };
+  }
+
+  /* Auto-Backup beim Sperren Toggle */
+  const lockToggle = document.getElementById('autoBackupOnLockToggle');
+  if(lockToggle){
+    lockToggle.onchange = () => {
+      db.settings.autoBackupOnLock = lockToggle.checked;
+      persist();
+      showToast(lockToggle.checked ? 'Backup beim Sperren aktiviert' : 'Backup beim Sperren deaktiviert');
+      render();
+    };
+  }
+
+  /* Ordner waehlen */
+  const pickBtn = document.getElementById('pickFolderBtn');
+  const folderHint = document.getElementById('folderHint');
+  if(pickBtn){
+    if(isFolderPickerSupported()){
+      pickBtn.disabled = false;
+      if(folderHint) folderHint.textContent = '';
+      pickBtn.onclick = async () => {
+        try {
+          const handle = await window.showDirectoryPicker({mode:'readwrite'});
+          await storeFolderHandle(handle);
+          db.settings.autoBackupFolderName = handle.name || 'gewählter Ordner';
+          persist();
+          showToast('Ordner gespeichert: ' + db.settings.autoBackupFolderName);
+          render();
+        } catch(e){
+          /* User hat den Picker abgebrochen - kein Alert noetig */
+          if(e?.name !== 'AbortError') console.warn('Ordner-Auswahl:', e);
+        }
+      };
+    } else {
+      pickBtn.disabled = true;
+      pickBtn.style.opacity = '0.5';
+      pickBtn.style.cursor = 'not-allowed';
+      if(folderHint){
+        folderHint.innerHTML = '⚠️ <b>Auf diesem Gerät (Tablet/Mobile) ist die Ordner-Auswahl technisch nicht möglich.</b> Die Backup-Datei landet immer im <i>Downloads</i>-Ordner. Auf einem Desktop-PC mit Chrome oder Edge können Sie einen festen Ordner wählen.';
+      }
+    }
+  }
+  const clearFolderBtn = document.getElementById('clearFolderBtn');
+  if(clearFolderBtn){
+    clearFolderBtn.onclick = async () => {
+      await clearStoredFolderHandle();
+      db.settings.autoBackupFolderName = '';
+      persist();
+      showToast('Ordner-Auswahl zurückgesetzt – Backup geht wieder in Downloads');
       render();
     };
   }
@@ -2497,7 +2695,7 @@ function doPrint(){
 /* ============================================================
    TOP-LEVEL EVENTS
    ============================================================ */
-document.getElementById('newPatientBtn').onclick = () => {
+function createNewPatient(){
   saveForm();
   const p = blankPatient();
   db.patients.unshift(p);
@@ -2505,7 +2703,9 @@ document.getElementById('newPatientBtn').onclick = () => {
   activeTab = 'stamm';
   persist(); render();
   setTimeout(() => document.querySelector('[data-path="stamm.name"]')?.focus(), 100);
-};
+}
+const newPatientSidebar = document.getElementById('newPatientSidebarBtn');
+if(newPatientSidebar) newPatientSidebar.onclick = createNewPatient;
 document.getElementById('saveBtn').onclick = () => { saveForm(); alert('Gespeichert.'); };
 document.getElementById('exportBtn').onclick = exportJson;
 document.getElementById('printBtn').onclick = doPrint;
@@ -2518,7 +2718,14 @@ document.getElementById('importSidebarFile').onchange = e => {
   handleImportFile(f);
   e.target.value = ''; /* Input zuruecksetzen, damit dieselbe Datei erneut importiert werden kann */
 };
-document.getElementById('lockBtn').onclick = () => { saveForm(); showLock(); };
+document.getElementById('lockBtn').onclick = async () => {
+  saveForm();
+  /* Optional: Backup beim Sperren erstellen, wenn aktiviert UND ungespeicherte Aenderungen */
+  if(db.settings.autoBackupOnLock && _hasUnsavedChanges){
+    try { await doAutoBackup(); } catch(e){ console.warn('Backup-on-Lock fehlgeschlagen:', e); }
+  }
+  showLock();
+};
 document.getElementById('deleteBtn').onclick = () => {
   if(!cur()) return;
   if(confirm('Aktuellen Patienten wirklich löschen?')){
