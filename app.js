@@ -5,22 +5,21 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
-const APP_VERSION = '1.22';
+const APP_VERSION = '1.23';
 const APP_RELEASE_DATE = '2026-05-10';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
 const TABS_ALL = [
   ['stamm','Stammdaten'],
   ['anamnese','Anamnese'],
-  ['evaluierung','Evaluierung vor Therapie'],
-  ['planung','Therapieplanung'],
+  ['evaluierung','Anfangs-Evaluierung'],
   ['ende','End-Evaluierung'],
+  ['planung','Therapieplanung'],
   ['auswertung','Auswertung'],
-  ['forschung','Forschungs-Auswertung'],
-  ['settings','Einstellungen']
+  ['forschung','Forschungs-Auswertung']
 ];
 const TABS_PATIENT = [
-  ['evaluierung','Evaluierung vor Therapie'],
+  ['evaluierung','Anfangs-Evaluierung'],
   ['ende','End-Evaluierung']
 ];
 
@@ -547,14 +546,14 @@ function render(){
 
   renderList();
   const hasPatient = !!cur();
-  const showSettingsWithoutPatient = !hasPatient && activeTab === 'settings' && userMode !== 'patient';
-  document.getElementById('empty').classList.toggle('hidden', hasPatient || showSettingsWithoutPatient);
-  document.getElementById('app').classList.toggle('hidden', !hasPatient && !showSettingsWithoutPatient);
-  if(hasPatient || showSettingsWithoutPatient){
+  const showSettings = activeTab === 'settings' && userMode !== 'patient';
+  document.getElementById('empty').classList.toggle('hidden', hasPatient || showSettings);
+  document.getElementById('app').classList.toggle('hidden', !hasPatient && !showSettings);
+  if(hasPatient || showSettings){
     if(hasPatient) ensureShape();
-    /* Falls activeTab nicht in den erlaubten Tabs ist, auf ersten erlaubten setzen */
+    /* Einstellungen sind kein Reiter mehr, bleiben aber ueber das Zahnrad jederzeit erreichbar. */
     const allowed = getActiveTabs().map(t => t[0]);
-    if(!allowed.includes(activeTab)) activeTab = allowed[0];
+    if(activeTab !== 'settings' && !allowed.includes(activeTab)) activeTab = allowed[0];
     renderTabs();
     renderPanels();
   }
@@ -1800,18 +1799,19 @@ function showToast(msg){
 
 function saveForm(){
   const p = cur();
-  if(!p) return;
+  /* Settings duerfen auch ohne ausgewaehlten Patienten gespeichert werden. */
+  document.querySelectorAll('[data-path^="__settings."]').forEach(el => {
+    if(el.type === 'radio' && !el.checked) return;
+    const key = el.dataset.path.split('.')[1];
+    db.settings[key] = el.value;
+  });
+  if(!p){ persist(); applyThemeAndBranding(); return; }
   /* Normale Pfade */
   document.querySelectorAll('[data-path]').forEach(el => {
     if(!el.dataset.path) return;
+    if(el.dataset.path.startsWith('__settings.')) return;
     if(el.type === 'radio' && !el.checked) return;
-    /* Settings haben Sonder-Prefix */
-    if(el.dataset.path.startsWith('__settings.')){
-      const key = el.dataset.path.split('.')[1];
-      db.settings[key] = el.value;
-    } else {
-      set(el.dataset.path, el.value);
-    }
+    set(el.dataset.path, el.value);
   });
   /* Mehrfachauswahl */
   document.querySelectorAll('[data-array]').forEach(el => {
