@@ -349,6 +349,13 @@ canvas{width:100%;max-height:360px}
 }
 .filterChip:hover{transform:translateY(-1px);border-color:var(--brand)}
 .filterChip.active{background:var(--brand);color:#fff;border-color:var(--brand);box-shadow:0 3px 10px #79504433}
+.filterChip.disabled{
+  opacity:.4;
+  cursor:not-allowed;
+  background:var(--muted);
+  color:#999;
+}
+.filterChip.disabled:hover{transform:none;border-color:var(--line)}
 .filterChip small{opacity:.85;margin-left:2px}
 @media print{
   .researchFilters{background:#f7f3ef!important;border-color:#c8b8ad!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}

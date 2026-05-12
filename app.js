@@ -5,7 +5,7 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
-const APP_VERSION = '1.19';
+const APP_VERSION = '1.20';
 const APP_RELEASE_DATE = '2026-05-10';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
@@ -1107,8 +1107,17 @@ function renderResearchPanel(){
   const counts = diagnosisCounts(dataset);
   const sortedDiags = Object.entries(counts).sort((a,b) => b[1] - a[1]);
 
-  /* Verfuegbare Werte fuer Filter ermitteln */
-  const availGenders = [...new Set(dataset.map(d => d.gender))].filter(g => g && g !== '?');
+  /* Verfuegbare Filter-Werte:
+     - Geschlecht: IMMER alle 3 Optionen anzeigen (mit Patienten-Anzahl als Hinweis)
+     - Altersgruppe: nur die in dataset tatsaechlich vorkommenden */
+  /* Geschlechter aus ALLEN Patienten ermitteln (nicht nur auswertbaren),
+     damit man auch sieht/filtern kann, bevor Patienten "vollstaendig" sind */
+  const allGendersInDb = db.patients.map(p => genderNorm(p.stamm?.gender));
+  const genderCounts = {männlich:0, weiblich:0, divers:0};
+  allGendersInDb.forEach(g => { if(genderCounts[g] !== undefined) genderCounts[g]++; });
+  const datasetGenderCounts = {männlich:0, weiblich:0, divers:0};
+  dataset.forEach(d => { if(datasetGenderCounts[d.gender] !== undefined) datasetGenderCounts[d.gender]++; });
+  const availGenders = ['männlich','weiblich','divers'];
   const availAgeGroups = [...new Set(dataset.map(d => d.ageGroup))].filter(g => g && g !== '?').sort();
 
   let html = `<h2>📊 Forschungs-Auswertung</h2>
@@ -1138,12 +1147,18 @@ function renderResearchPanel(){
         </div>
       </div>
 
-      ${availGenders.length ? `<div class="filterBlock">
+      <div class="filterBlock">
         <div class="filterLabel">Geschlecht</div>
         <div class="filterChips">
-          ${availGenders.map(g => `<span class="filterChip ${researchFilters.genders.includes(g)?'active':''}" data-filter="gender" data-value="${esc(g)}">${esc(g)}</span>`).join('')}
+          ${availGenders.map(g => {
+            const inDb = genderCounts[g] || 0;
+            const inDataset = datasetGenderCounts[g] || 0;
+            const isActive = researchFilters.genders.includes(g);
+            const disabled = inDataset === 0;
+            return `<span class="filterChip ${isActive?'active':''} ${disabled?'disabled':''}" data-filter="gender" data-value="${esc(g)}" ${disabled?'title="Keine auswertbaren Patienten mit diesem Geschlecht"':''}>${esc(g)} <small>(${inDataset}${inDb!==inDataset?'/'+inDb:''})</small></span>`;
+          }).join('')}
         </div>
-      </div>`:''}
+      </div>
 
       ${availAgeGroups.length ? `<div class="filterBlock">
         <div class="filterLabel">Altersgruppe</div>
@@ -1193,6 +1208,7 @@ function renderResearchPanel(){
   /* Filter-Klicks */
   document.querySelectorAll('.filterChip').forEach(c => {
     c.onclick = () => {
+      if(c.classList.contains('disabled')) return;
       const f = c.dataset.filter;
       const v = c.dataset.value;
       if(f === 'diagnosis'){
