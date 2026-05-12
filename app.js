@@ -5,7 +5,7 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
-const APP_VERSION = '1.20';
+const APP_VERSION = '1.21';
 const APP_RELEASE_DATE = '2026-05-10';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
@@ -527,9 +527,19 @@ function render(){
   /* Sidebar im Patientenmodus ausblenden */
   document.getElementById('sidebar').style.display = userMode === 'patient' ? 'none' : '';
   document.getElementById('mainWrap').style.gridTemplateColumns = userMode === 'patient' ? '1fr' : '320px 1fr';
-  /* "Export", "Drucken" für Patienten ausblenden */
+  /* "Export", "Drucken" und Einstellungen fuer Patienten ausblenden */
   document.getElementById('exportBtn').style.display = userMode === 'patient' ? 'none' : '';
   document.getElementById('printBtn').style.display = userMode === 'patient' ? 'none' : '';
+  const settingsTopBtn = document.getElementById('settingsTopBtn');
+  if(settingsTopBtn) settingsTopBtn.style.display = userMode === 'patient' ? 'none' : '';
+
+  /* Im Patientenmodus oben den aktuell ausgewaehlten Patienten anzeigen */
+  const headerPatientName = document.getElementById('headerPatientName');
+  if(headerPatientName){
+    const name = cur()?.stamm?.name || 'Unbenannter Patient';
+    headerPatientName.textContent = userMode === 'patient' && cur() ? 'Patient: ' + name : '';
+    headerPatientName.style.display = userMode === 'patient' && cur() ? '' : 'none';
+  }
 
   /* Neuer-Patient-Btn in Sidebar nur sichtbar im Stammdaten-Reiter */
   const newSb = document.getElementById('newPatientSidebarBtn');
@@ -604,10 +614,8 @@ function evalFull(prefix,title,intro){
     <h3>Aktuelle Beschwerden (0 = keine Beschwerden, 10 = maximal)</h3>
     ${symptoms.map(s => scale(prefix+'.values.'+s, s)).join('')}
     <h3>Schlaf &amp; Stimmung</h3>
-    <div class="grid">
-      ${sleepDurationField(prefix+'.sleepDuration','Durchschnittliche Schlafdauer')}
-      ${scale(prefix+'.sleepQuality','Schlafqualität')}
-    </div>
+    ${sleepDurationField(prefix+'.sleepDuration','Durchschnittliche Schlafdauer')}
+    ${scale(prefix+'.sleepQuality','Schlafqualität')}
     <h3>Stimmung / Begleitbeschwerden</h3>
     ${chips(prefix+'.mood', mood)}
     <h3>Vegetative Symptome</h3>
@@ -806,7 +814,7 @@ function patientImprovement(p){
   });
 
   let symptomScore = null;
-  if(pairs.length >= 3){
+  if(pairs.length >= 1){
     const avgPre = pairs.reduce((a,b) => a + b.pre, 0) / pairs.length;
     const avgPost = pairs.reduce((a,b) => a + b.post, 0) / pairs.length;
     symptomScore = avgPre === 0 ? 0 : Math.round(((avgPre - avgPost) / avgPre) * 100);
@@ -1121,7 +1129,7 @@ function renderResearchPanel(){
   const availAgeGroups = [...new Set(dataset.map(d => d.ageGroup))].filter(g => g && g !== '?').sort();
 
   let html = `<h2>📊 Forschungs-Auswertung</h2>
-    <p class="smallMuted">Aggregierte Analyse über alle Patienten der Kartei. Ein Patient gilt als "auswertbar", wenn er mindestens 3 Beschwerde-Werte vor und nach Therapie sowie mindestens eine durchgeführte Sitzung hat.</p>
+    <p class="smallMuted">Aggregierte Analyse über alle Patienten der Kartei. Ein Patient gilt als "auswertbar", wenn mindestens 1 Beschwerde-Wert vor und nach Therapie oder eine End-Einschätzung vorhanden ist – plus mindestens eine durchgeführte Sitzung.</p>
     <div class="researchGrid">
       <div class="statCard"><div class="lbl">Patienten gesamt</div><div class="num">${total}</div></div>
       <div class="statCard"><div class="lbl">Auswertbar</div><div class="num">${evaluable}</div><div class="sub">${total ? Math.round(evaluable/total*100) : 0}% der Kartei</div></div>
@@ -1129,7 +1137,7 @@ function renderResearchPanel(){
     </div>`;
 
   if(evaluable < 1){
-    html += `<div class="researchWarn">⚠️ Noch keine auswertbaren Patientendaten. Patienten benötigen entweder Vor-/Nach-Evaluierung mit mindestens 3 Beschwerde-Skalen <i>oder</i> ein ausgefülltes End-Ergebnis-Feld – plus mindestens eine durchgeführte Sitzung mit Hz-Wert.</div>`;
+    html += `<div class="researchWarn">⚠️ Noch keine auswertbaren Patientendaten. Patienten benötigen entweder Vor-/Nach-Evaluierung mit mindestens 1 Beschwerde-Skala <i>oder</i> ein ausgefülltes End-Ergebnis-Feld – plus mindestens eine durchgeführte Sitzung mit Hz-Wert.</div>`;
     document.querySelector('[data-panel="forschung"]').innerHTML = html;
     return;
   }
@@ -1693,7 +1701,7 @@ function renderPanels(){
           <label class="toggleSwitch">
             <input type="checkbox" id="autoBackupOnLockToggle" ${db.settings.autoBackupOnLock?'checked':''}>
             <span class="slider"></span>
-            <span class="toggleLabel">${db.settings.autoBackupOnLock?'beim Sperren wird gesichert':'kein Backup beim Sperren'}</span>
+            <span class="toggleLabel">${db.settings.autoBackupOnLock?'Ein':'Aus'}</span>
           </label>
         </div>
       </div>
@@ -2805,6 +2813,14 @@ if(newPatientSidebar) newPatientSidebar.onclick = createNewPatient;
 document.getElementById('saveBtn').onclick = () => { saveForm(); alert('Gespeichert.'); };
 document.getElementById('exportBtn').onclick = exportJson;
 document.getElementById('printBtn').onclick = doPrint;
+const settingsTopBtn = document.getElementById('settingsTopBtn');
+if(settingsTopBtn){
+  settingsTopBtn.onclick = () => {
+    autosaveAndToast();
+    activeTab = 'settings';
+    render();
+  };
+}
 document.getElementById('exportSinglePatientBtn').onclick = exportSinglePatient;
 /* Sidebar-Import: oeffnet versteckten File-Input, der dann handleImportFile aufruft */
 document.getElementById('importSidebarBtn').onclick = () => document.getElementById('importSidebarFile').click();
