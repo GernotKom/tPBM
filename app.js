@@ -5,7 +5,7 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
-const APP_VERSION = '1.18';
+const APP_VERSION = '1.19';
 const APP_RELEASE_DATE = '2026-05-10';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
@@ -1035,24 +1035,36 @@ function buildHeatmap(dataset){
   return {hzBins, intBins, cells};
 }
 
-/* Farbe fuer Heatmap-Zelle (rot = verschlechtert, grau = unveraendert, gruen = verbessert) */
+/* Farbe fuer Heatmap-Zelle - kraeftiger Verlauf von Rot ueber Grau zu Gruen */
 function heatColor(imp, n){
-  if(imp === null || n === 0) return '#e5e5e5';
-  if(n < 2) return '#c2c0bd'; /* zu wenige Daten */
-  /* Skala: -50% (rot) bis +50% (gruen) */
+  if(imp === null || n === 0) return '#ececec';     /* leer = sehr hell-grau */
+  if(n < 2) return '#dcdcdc';                        /* zu wenige Daten = hellgrau */
+  /* Skala: -50% (dunkelrot) → 0 (grau) → +50% (dunkelgruen) */
   const clamped = Math.max(-50, Math.min(50, imp));
-  if(clamped > 0){
-    /* gruen: 0 -> hellgruen, 50 -> dunkelgruen */
-    const t = clamped / 50;
-    const r = Math.round(180 - 180*t), g = Math.round(220 - 80*t), b = Math.round(180 - 130*t);
+  if(clamped > 5){
+    /* Gruen-Verlauf: 5 -> hellgrün, 50 -> kräftiges Dunkelgrün */
+    const t = (clamped - 5) / 45;
+    const r = Math.round(124 - 111*t);  // 124->13
+    const g = Math.round(195 - 88*t);   // 195->107
+    const b = Math.round(110 - 50*t);   // 110->60
     return `rgb(${r},${g},${b})`;
-  } else if(clamped < 0){
-    const t = -clamped / 50;
-    const r = Math.round(220 - 40*t), g = Math.round(180 - 140*t), b = Math.round(180 - 140*t);
+  } else if(clamped < -5){
+    /* Rot-Verlauf: -5 -> hellrot, -50 -> dunkelrot */
+    const t = (-clamped - 5) / 45;
+    const r = Math.round(220 - 67*t);   // 220->153
+    const g = Math.round(89 - 57*t);    // 89->32
+    const b = Math.round(89 - 57*t);
     return `rgb(${r},${g},${b})`;
   } else {
-    return '#9ca3af';
+    /* nahe 0 = neutraler Grauton */
+    return '#b8b8b8';
   }
+}
+function heatTextColor(imp, n){
+  if(imp === null || n === 0) return '#999';
+  if(n < 2) return '#777';
+  /* Bei kräftigen Farben weisser Text */
+  return Math.abs(imp) > 5 ? '#fff' : '#222';
 }
 
 /* Subgruppen-Analyse: Verbesserung nach Geschlecht / Altersgruppe */
@@ -1263,8 +1275,8 @@ function renderDiagnosisAnalysis(diag, sub, allDataset){
   </div>`;
 
   /* Optimale Parameter */
-  html += `<h3>Statistisch optimale Parameter</h3>
-    <p class="smallMuted">Pro Bin wird die mittlere Verbesserung berechnet. Höhere Werte = besser.</p>`;
+  html += `<h3>Optimale Therapie-Parameter</h3>
+    <p class="smallMuted">Pro Parameter-Bereich wird die mittlere Verbesserung berechnet. Höhere Balken = besser. ⭐ markiert den Bereich mit dem besten Ergebnis.</p>`;
 
   /* Optimale Parameter - alle Bins aus zentralen Konstanten oben */
   const hzOpt  = findOptimum(sub, 'avgHz',         HZ_BINS);
@@ -1272,10 +1284,24 @@ function renderDiagnosisAnalysis(diag, sub, allDataset){
   const durOpt = findOptimum(sub, 'avgDuration',   DUR_BINS);
   const sesOpt = findOptimum(sub, 'sessions',      SES_BINS);
 
-  html += renderOptimumTable('Frequenz (Hz)', hzOpt);
-  html += renderOptimumTable('Intensität (%)', intOpt);
-  html += renderOptimumTable('Sitzungsdauer (min)', durOpt);
-  html += renderOptimumTable('Anzahl Sitzungen', sesOpt);
+  /* Visuelle Diagramme zuerst (auf einen Blick erkennbar) */
+  html += `<div class="optChartGrid">
+    ${renderOptimumChart('Frequenz (Hz)', hzOpt)}
+    ${renderOptimumChart('Intensität (%)', intOpt)}
+    ${renderOptimumChart('Sitzungsdauer (min)', durOpt)}
+    ${renderOptimumChart('Anzahl Sitzungen', sesOpt)}
+  </div>`;
+
+  /* Detail-Tabellen darunter zum Nachschauen */
+  html += `<details class="researchDetails">
+    <summary>Detailwerte als Tabelle anzeigen</summary>
+    <div class="researchDetailsBody">
+      ${renderOptimumTable('Frequenz (Hz)', hzOpt)}
+      ${renderOptimumTable('Intensität (%)', intOpt)}
+      ${renderOptimumTable('Sitzungsdauer (min)', durOpt)}
+      ${renderOptimumTable('Anzahl Sitzungen', sesOpt)}
+    </div>
+  </details>`;
 
   /* Heatmap */
   html += `<h3>Heatmap: Frequenz × Intensität</h3>
@@ -1340,9 +1366,41 @@ function renderOptimumTable(title, opt){
   </table>`;
 }
 
+/* Visuelles Balken-Diagramm: pro Bin ein farbiger Balken mit % und n.
+   Hilft schneller zu erkennen, welche Parameter-Stufe den besten Erfolg bringt. */
+function renderOptimumChart(title, opt){
+  if(!opt.length) return '';
+  /* Best-Bin ermitteln */
+  const best = opt.reduce((a,b) => (b.meanImprovement ?? -999) > (a.meanImprovement ?? -999) ? b : a, opt[0]);
+  /* Skala fuer Balkenhoehe: max(|imp|, 50) als Achsenmax */
+  const maxAbs = Math.max(50, ...opt.map(o => Math.abs(o.meanImprovement ?? 0)));
+
+  return `<div class="optChart">
+    <div class="optChartTitle">${esc(title)} <span class="smallMuted">– Balken je Bereich, ⭐ = bester Wert</span></div>
+    <div class="optChartBars">
+      ${opt.map(o => {
+        const imp = o.meanImprovement;
+        const hasData = imp !== null && o.n >= 1;
+        const isBest = o === best && hasData && imp > 0;
+        const heightPct = hasData ? Math.abs(imp) / maxAbs * 100 : 0;
+        const color = hasData ? heatColor(imp, o.n) : '#ececec';
+        const txtColor = hasData ? heatTextColor(imp, o.n) : '#999';
+        const posClass = hasData ? (imp >= 0 ? 'bar-pos' : 'bar-neg') : 'bar-empty';
+        return `<div class="optBar ${posClass} ${isBest?'optBarBest':''}">
+          <div class="optBarValue">${hasData ? (imp>0?'+':'') + Math.round(imp) + '%' : '–'}</div>
+          <div class="optBarTrack">
+            <div class="optBarFill" style="height:${heightPct}%;background:${color};color:${txtColor}"></div>
+          </div>
+          <div class="optBarLabel">${esc(o.label)}${isBest?' ⭐':''}</div>
+          <div class="optBarN">n=${o.n}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
 function renderHeatmap(hm){
   /* Grid: 1 Header-Spalte + intBins.length Spalten */
-  const cols = 1 + hm.intBins.length;
   let html = `<div class="heatmap" style="grid-template-columns:120px repeat(${hm.intBins.length},1fr)">`;
   /* Kopfzeile */
   html += `<div></div>`;
@@ -1353,10 +1411,10 @@ function renderHeatmap(hm){
     hm.intBins.forEach((it, ii) => {
       const cell = hm.cells.find(c => c.row === hi && c.col === ii);
       const color = heatColor(cell.meanImprovement, cell.n);
-      const txtColor = (cell.n < 2 || cell.meanImprovement === null) ? '#666' : '#fff';
+      const txtColor = heatTextColor(cell.meanImprovement, cell.n);
       html += `<div class="heatCell" style="background:${color};color:${txtColor}">
         ${cell.meanImprovement !== null ? (cell.meanImprovement > 0 ? '+' : '') + cell.meanImprovement + '%' : '–'}
-        <span class="n">n=${cell.n}</span>
+        <span class="n" style="color:${txtColor};opacity:.85">n=${cell.n}</span>
       </div>`;
     });
   });
@@ -1423,14 +1481,36 @@ function renderPanels(){
         ${input('stamm.date','Datum','date')}
         ${input('stamm.name','Name, Vorname')}
         ${input('stamm.birth','Geburtsdatum','date')}
-        ${input('stamm.gender','Geschlecht')}
         ${input('stamm.doctor','Behandelnde/r Arzt / Therapeut')}
         ${input('stamm.facility','Einrichtung / Praxis')}
-      </div>`;
+      </div>
+      <p class="smallMuted" style="margin-top:4px">Hinweis: Geschlecht wird im Reiter „Anamnese" erfasst.</p>`;
   }
 
   if(q('anamnese')){
+    const currentGender = (cur().stamm?.gender || '').toLowerCase().trim();
+    const isM = currentGender.startsWith('m');
+    const isW = currentGender.startsWith('w') || currentGender.startsWith('f');
+    const isD = currentGender.startsWith('d') || currentGender.startsWith('div') || currentGender === 'x';
+
     q('anamnese').innerHTML = `<h2>📝 Anamnese</h2>
+
+      <h3>Geschlecht</h3>
+      <div class="genderScale">
+        <label class="genderOption ${isM?'active':''}">
+          <input type="radio" name="stamm.gender" data-path="stamm.gender" value="männlich" ${isM?'checked':''}>
+          <span>♂ Männlich</span>
+        </label>
+        <label class="genderOption ${isW?'active':''}">
+          <input type="radio" name="stamm.gender" data-path="stamm.gender" value="weiblich" ${isW?'checked':''}>
+          <span>♀ Weiblich</span>
+        </label>
+        <label class="genderOption ${isD?'active':''}">
+          <input type="radio" name="stamm.gender" data-path="stamm.gender" value="divers" ${isD?'checked':''}>
+          <span>⚥ Divers</span>
+        </label>
+      </div>
+
       <h3>Diagnostizierte Vorerkrankungen <span class="smallMuted" style="font-weight:400; font-size:14px">– vom Arzt einzuschätzen</span></h3>
       <p class="smallMuted" style="margin:-4px 0 8px">Nur durch behandelnde Ärztin/Arzt vergebene Diagnosen ankreuzen. Diese fließen optional in die statistische Forschungs-Auswertung ein (siehe Filter dort).</p>
       ${chips('anamnese.diagnoses',diagnoses)}

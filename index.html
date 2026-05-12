@@ -137,6 +137,34 @@ textarea{min-height:90px;resize:vertical}
   }
 }
 
+/* === Geschlechts-Auswahl (Anamnese) === */
+.genderScale{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 16px}
+.genderOption{
+  flex:1;min-width:140px;text-align:center;
+  border:2px solid var(--line);
+  border-radius:12px;
+  padding:14px 12px;
+  background:var(--card);
+  cursor:pointer;
+  font-weight:700;
+  font-size:15px;
+  transition:transform .08s, background .15s, border-color .15s;
+}
+.genderOption input{position:absolute;opacity:0;pointer-events:none;width:0;height:0}
+.genderOption:hover{transform:translateY(-1px);border-color:var(--brand)}
+.genderOption:has(input:checked),.genderOption.active{
+  background:var(--brand);
+  color:#fff;
+  border-color:var(--brand);
+  border-width:3px;
+  padding:13px 11px;
+  box-shadow:0 4px 14px #00000022;
+}
+@media print{
+  .genderOption{border-color:#999!important;background:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .genderOption:has(input:checked),.genderOption.active{background:#795044!important;color:#fff!important;border-color:#795044!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+
 /* === Smiley-Skala fuer Zufriedenheit (1-10) === */
 .smileyScale{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 16px}
 .smileyScale label{flex:1;min-width:62px;text-align:center;border:2px solid var(--line);border-radius:12px;padding:10px 6px;background:var(--card);cursor:pointer;font-weight:700;font-size:13px;transition:transform .1s, background .15s;display:flex;flex-direction:column;align-items:center;gap:4px}
@@ -254,6 +282,49 @@ canvas{width:100%;max-height:360px}
 .heatCell .n{font-size:10px;opacity:.85;font-weight:500}
 .heatHeader{padding:6px;font-weight:800;font-size:11px;text-align:center;background:var(--muted);border-radius:6px}
 .heatRowLabel{padding:6px 8px;font-weight:800;font-size:11px;text-align:right;display:flex;align-items:center;justify-content:flex-end;background:var(--muted);border-radius:6px}
+
+/* === Optimum-Charts: Balken-Diagramme pro Parameter === */
+.optChartGrid{display:grid;grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));gap:16px;margin:14px 0}
+.optChart{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.optChartTitle{font-weight:800;font-size:14px;margin-bottom:10px;color:var(--brand)}
+.optChartBars{display:flex;align-items:flex-end;gap:6px;height:200px;border-bottom:2px solid var(--line);padding-bottom:6px}
+.optBar{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;text-align:center}
+.optBarValue{font-size:11px;font-weight:800;margin-bottom:2px;color:var(--text);height:14px}
+.optBarTrack{
+  width:100%;
+  flex:1;
+  display:flex;
+  flex-direction:column;
+  justify-content:flex-end;
+  background:#f0f0f0;
+  border-radius:4px 4px 0 0;
+  overflow:hidden;
+  min-height:8px;
+}
+.optBarFill{
+  width:100%;
+  min-height:4px;
+  border-radius:4px 4px 0 0;
+  transition:height .3s;
+}
+.bar-empty .optBarFill{background:#e0e0e0!important}
+.optBarLabel{font-size:11px;font-weight:600;margin-top:6px;line-height:1.2}
+.optBarN{font-size:10px;opacity:.7;margin-top:2px}
+.optBarBest .optBarLabel{color:#1b8a4f;font-weight:800}
+.optBarBest .optBarTrack{outline:2px solid #1b8a4f;outline-offset:1px}
+
+/* === Detail-Tabellen einklappbar === */
+.researchDetails{margin:14px 0;background:var(--muted);border:1px solid var(--line);border-radius:10px;padding:6px 12px}
+.researchDetails summary{cursor:pointer;font-weight:700;padding:6px 0;color:var(--brand);font-size:14px}
+.researchDetailsBody{margin-top:8px}
+.researchDetailsBody .researchTable{margin-bottom:10px}
+@media print{
+  .optChart,.heatCell,.statCard{
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+  .researchDetails[open] .researchDetailsBody{display:block}
+  .researchDetails:not([open]) .researchDetailsBody{display:none}
+}
 
 .diagSelector{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
 .diagSelector .chip{cursor:pointer}
@@ -461,10 +532,10 @@ canvas{width:100%;max-height:360px}
     <hr>
     <div class="sidebarBtns">
       <button class="primary" id="newPatientSidebarBtn">+ Neuer Patient</button>
+      <button class="danger" id="deleteBtn">🗑️ Aktuellen Patienten löschen</button>
       <button class="muted" id="exportSinglePatientBtn">📤 Diesen Patienten exportieren</button>
       <button class="muted" id="importSidebarBtn">📥 Patient/Kartei importieren</button>
       <input id="importSidebarFile" type="file" accept="application/json" class="hidden">
-      <button class="danger" id="deleteBtn">🗑️ Aktuellen Patienten löschen</button>
     </div>
     <div class="notice ok"><b>DSGVO:</b> Daten werden lokal in diesem Browser gespeichert. Regelmäßig Backup exportieren.</div>
   </aside>
