@@ -5,21 +5,22 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
-const APP_VERSION = '1.23';
+const APP_VERSION = '1.20';
 const APP_RELEASE_DATE = '2026-05-10';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
 const TABS_ALL = [
   ['stamm','Stammdaten'],
   ['anamnese','Anamnese'],
-  ['evaluierung','Anfangs-Evaluierung'],
-  ['ende','End-Evaluierung'],
+  ['evaluierung','Evaluierung vor Therapie'],
   ['planung','Therapieplanung'],
+  ['ende','End-Evaluierung'],
   ['auswertung','Auswertung'],
-  ['forschung','Forschungs-Auswertung']
+  ['forschung','Forschungs-Auswertung'],
+  ['settings','Einstellungen']
 ];
 const TABS_PATIENT = [
-  ['evaluierung','Anfangs-Evaluierung'],
+  ['evaluierung','Evaluierung vor Therapie'],
   ['ende','End-Evaluierung']
 ];
 
@@ -526,34 +527,22 @@ function render(){
   /* Sidebar im Patientenmodus ausblenden */
   document.getElementById('sidebar').style.display = userMode === 'patient' ? 'none' : '';
   document.getElementById('mainWrap').style.gridTemplateColumns = userMode === 'patient' ? '1fr' : '320px 1fr';
-  /* "Export", "Drucken" und Einstellungen fuer Patienten ausblenden */
+  /* "Export", "Drucken" für Patienten ausblenden */
   document.getElementById('exportBtn').style.display = userMode === 'patient' ? 'none' : '';
   document.getElementById('printBtn').style.display = userMode === 'patient' ? 'none' : '';
-  const settingsTopBtn = document.getElementById('settingsTopBtn');
-  if(settingsTopBtn) settingsTopBtn.style.display = userMode === 'patient' ? 'none' : '';
-
-  /* Im Patientenmodus oben den aktuell ausgewaehlten Patienten anzeigen */
-  const headerPatientName = document.getElementById('headerPatientName');
-  if(headerPatientName){
-    const name = cur()?.stamm?.name || 'Unbenannter Patient';
-    headerPatientName.textContent = userMode === 'patient' && cur() ? 'Patient: ' + name : '';
-    headerPatientName.style.display = userMode === 'patient' && cur() ? '' : 'none';
-  }
 
   /* Neuer-Patient-Btn in Sidebar nur sichtbar im Stammdaten-Reiter */
   const newSb = document.getElementById('newPatientSidebarBtn');
-  if(newSb) newSb.style.display = userMode === 'patient' ? 'none' : '';
+  if(newSb) newSb.style.display = (activeTab === 'stamm') ? '' : 'none';
 
   renderList();
-  const hasPatient = !!cur();
-  const showSettings = activeTab === 'settings' && userMode !== 'patient';
-  document.getElementById('empty').classList.toggle('hidden', hasPatient || showSettings);
-  document.getElementById('app').classList.toggle('hidden', !hasPatient && !showSettings);
-  if(hasPatient || showSettings){
-    if(hasPatient) ensureShape();
-    /* Einstellungen sind kein Reiter mehr, bleiben aber ueber das Zahnrad jederzeit erreichbar. */
+  document.getElementById('empty').classList.toggle('hidden', !!cur());
+  document.getElementById('app').classList.toggle('hidden', !cur());
+  if(cur()){
+    ensureShape();
+    /* Falls activeTab nicht in den erlaubten Tabs ist, auf ersten erlaubten setzen */
     const allowed = getActiveTabs().map(t => t[0]);
-    if(activeTab !== 'settings' && !allowed.includes(activeTab)) activeTab = allowed[0];
+    if(!allowed.includes(activeTab)) activeTab = allowed[0];
     renderTabs();
     renderPanels();
   }
@@ -615,8 +604,10 @@ function evalFull(prefix,title,intro){
     <h3>Aktuelle Beschwerden (0 = keine Beschwerden, 10 = maximal)</h3>
     ${symptoms.map(s => scale(prefix+'.values.'+s, s)).join('')}
     <h3>Schlaf &amp; Stimmung</h3>
-    ${sleepDurationField(prefix+'.sleepDuration','Durchschnittliche Schlafdauer')}
-    ${scale(prefix+'.sleepQuality','Schlafqualität')}
+    <div class="grid">
+      ${sleepDurationField(prefix+'.sleepDuration','Durchschnittliche Schlafdauer')}
+      ${scale(prefix+'.sleepQuality','Schlafqualität')}
+    </div>
     <h3>Stimmung / Begleitbeschwerden</h3>
     ${chips(prefix+'.mood', mood)}
     <h3>Vegetative Symptome</h3>
@@ -815,7 +806,7 @@ function patientImprovement(p){
   });
 
   let symptomScore = null;
-  if(pairs.length >= 1){
+  if(pairs.length >= 3){
     const avgPre = pairs.reduce((a,b) => a + b.pre, 0) / pairs.length;
     const avgPost = pairs.reduce((a,b) => a + b.post, 0) / pairs.length;
     symptomScore = avgPre === 0 ? 0 : Math.round(((avgPre - avgPost) / avgPre) * 100);
@@ -1130,7 +1121,7 @@ function renderResearchPanel(){
   const availAgeGroups = [...new Set(dataset.map(d => d.ageGroup))].filter(g => g && g !== '?').sort();
 
   let html = `<h2>📊 Forschungs-Auswertung</h2>
-    <p class="smallMuted">Aggregierte Analyse über alle Patienten der Kartei. Ein Patient gilt als "auswertbar", wenn mindestens 1 Beschwerde-Wert vor und nach Therapie oder eine End-Einschätzung vorhanden ist – plus mindestens eine durchgeführte Sitzung.</p>
+    <p class="smallMuted">Aggregierte Analyse über alle Patienten der Kartei. Ein Patient gilt als "auswertbar", wenn er mindestens 3 Beschwerde-Werte vor und nach Therapie sowie mindestens eine durchgeführte Sitzung hat.</p>
     <div class="researchGrid">
       <div class="statCard"><div class="lbl">Patienten gesamt</div><div class="num">${total}</div></div>
       <div class="statCard"><div class="lbl">Auswertbar</div><div class="num">${evaluable}</div><div class="sub">${total ? Math.round(evaluable/total*100) : 0}% der Kartei</div></div>
@@ -1138,7 +1129,7 @@ function renderResearchPanel(){
     </div>`;
 
   if(evaluable < 1){
-    html += `<div class="researchWarn">⚠️ Noch keine auswertbaren Patientendaten. Patienten benötigen entweder Vor-/Nach-Evaluierung mit mindestens 1 Beschwerde-Skala <i>oder</i> ein ausgefülltes End-Ergebnis-Feld – plus mindestens eine durchgeführte Sitzung mit Hz-Wert.</div>`;
+    html += `<div class="researchWarn">⚠️ Noch keine auswertbaren Patientendaten. Patienten benötigen entweder Vor-/Nach-Evaluierung mit mindestens 3 Beschwerde-Skalen <i>oder</i> ein ausgefülltes End-Ergebnis-Feld – plus mindestens eine durchgeführte Sitzung mit Hz-Wert.</div>`;
     document.querySelector('[data-panel="forschung"]').innerHTML = html;
     return;
   }
@@ -1499,7 +1490,7 @@ function renderPanels(){
   document.querySelectorAll('[data-panel]').forEach(s => s.classList.toggle('hidden', s.dataset.panel !== activeTab));
   const p = cur();
 
-  if(p && q('stamm')){
+  if(q('stamm')){
     /* Sitzungs-Nr. entfernt */
     q('stamm').innerHTML = `<h2>📋 Stammdaten</h2>
       <div class="grid">
@@ -1512,7 +1503,7 @@ function renderPanels(){
       <p class="smallMuted" style="margin-top:4px">Hinweis: Geschlecht wird im Reiter „Anamnese" erfasst.</p>`;
   }
 
-  if(p && q('anamnese')){
+  if(q('anamnese')){
     const currentGender = (cur().stamm?.gender || '').toLowerCase().trim();
     const isM = currentGender.startsWith('m');
     const isW = currentGender.startsWith('w') || currentGender.startsWith('f');
@@ -1544,11 +1535,11 @@ function renderPanels(){
       ${textarea('anamnese.notes','Anamnese-Anmerkungen')}`;
   }
 
-  if(p && q('evaluierung')){
+  if(q('evaluierung')){
     q('evaluierung').innerHTML = evalFull('evaluierung','📊 Evaluierung vor Therapie','Vollständiger Ausgangsfragebogen: Beschwerden, Schlaf/Stimmung und vegetative Symptome. Die End-Evaluierung enthält exakt dieselben Felder für den Vergleich.');
   }
 
-  if(p && q('planung')){
+  if(q('planung')){
     q('planung').innerHTML = `<h2>📅 Therapieplanung</h2>
       <div class="grid">
         ${input('planung.start','Therapiebeginn','date')}
@@ -1569,7 +1560,7 @@ function renderPanels(){
       ${maintenanceBlockHtml(p)}`;
   }
 
-  if(p && q('ende')){
+  if(q('ende')){
     /* Farbverlauf: dunkelgruen -> hellgruen -> orange -> hellrot -> dunkelrot
        Mit fest berechneten hellen Hintergrund-Farben fuer alte Browser */
     const comparisonOptions = [
@@ -1624,7 +1615,7 @@ function renderPanels(){
       ` + evalFull('ende','📋 Fragebogen nach Therapie','Exakt derselbe Fragebogen wie bei der Evaluierung vor Therapie.');
   }
 
-  if(p && q('auswertung')){
+  if(q('auswertung')){
     q('auswertung').innerHTML = `<h2>📈 Patienten-Auswertung</h2>
 
       <h3 style="margin-top:18px">Symptom-Veränderung im Detail</h3>
@@ -1702,7 +1693,7 @@ function renderPanels(){
           <label class="toggleSwitch">
             <input type="checkbox" id="autoBackupOnLockToggle" ${db.settings.autoBackupOnLock?'checked':''}>
             <span class="slider"></span>
-            <span class="toggleLabel">${db.settings.autoBackupOnLock?'Ein':'Aus'}</span>
+            <span class="toggleLabel">${db.settings.autoBackupOnLock?'beim Sperren wird gesichert':'kein Backup beim Sperren'}</span>
           </label>
         </div>
       </div>
@@ -1799,19 +1790,18 @@ function showToast(msg){
 
 function saveForm(){
   const p = cur();
-  /* Settings duerfen auch ohne ausgewaehlten Patienten gespeichert werden. */
-  document.querySelectorAll('[data-path^="__settings."]').forEach(el => {
-    if(el.type === 'radio' && !el.checked) return;
-    const key = el.dataset.path.split('.')[1];
-    db.settings[key] = el.value;
-  });
-  if(!p){ persist(); applyThemeAndBranding(); return; }
+  if(!p) return;
   /* Normale Pfade */
   document.querySelectorAll('[data-path]').forEach(el => {
     if(!el.dataset.path) return;
-    if(el.dataset.path.startsWith('__settings.')) return;
     if(el.type === 'radio' && !el.checked) return;
-    set(el.dataset.path, el.value);
+    /* Settings haben Sonder-Prefix */
+    if(el.dataset.path.startsWith('__settings.')){
+      const key = el.dataset.path.split('.')[1];
+      db.settings[key] = el.value;
+    } else {
+      set(el.dataset.path, el.value);
+    }
   });
   /* Mehrfachauswahl */
   document.querySelectorAll('[data-array]').forEach(el => {
@@ -2815,14 +2805,6 @@ if(newPatientSidebar) newPatientSidebar.onclick = createNewPatient;
 document.getElementById('saveBtn').onclick = () => { saveForm(); alert('Gespeichert.'); };
 document.getElementById('exportBtn').onclick = exportJson;
 document.getElementById('printBtn').onclick = doPrint;
-const settingsTopBtn = document.getElementById('settingsTopBtn');
-if(settingsTopBtn){
-  settingsTopBtn.onclick = () => {
-    autosaveAndToast();
-    activeTab = 'settings';
-    render();
-  };
-}
 document.getElementById('exportSinglePatientBtn').onclick = exportSinglePatient;
 /* Sidebar-Import: oeffnet versteckten File-Input, der dann handleImportFile aufruft */
 document.getElementById('importSidebarBtn').onclick = () => document.getElementById('importSidebarFile').click();
