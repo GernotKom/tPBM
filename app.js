@@ -545,19 +545,27 @@ function render(){
     }
   }
 
-  /* Neuer-Patient-Btn in Sidebar nur sichtbar im Stammdaten-Reiter */
+  /* Neuer-Patient-Btn in Sidebar nur sichtbar im Stammdaten-Reiter (oder Settings) */
   const newSb = document.getElementById('newPatientSidebarBtn');
   if(newSb) newSb.style.display = (activeTab === 'stamm') ? '' : 'none';
 
   renderList();
-  document.getElementById('empty').classList.toggle('hidden', !!cur());
-  document.getElementById('app').classList.toggle('hidden', !cur());
+  const hasPatient = !!cur();
+  const isSettings = activeTab === 'settings';
+  document.getElementById('empty').classList.toggle('hidden', hasPatient || isSettings);
+  document.getElementById('app').classList.toggle('hidden', !hasPatient && !isSettings);
   if(cur()){
     ensureShape();
-    /* Falls activeTab nicht in den erlaubten Tabs ist, auf ersten erlaubten setzen */
-    const allowed = getActiveTabs().map(t => t[0]);
-    if(!allowed.includes(activeTab)) activeTab = allowed[0];
+    /* Settings ist ein Sonder-Tab außerhalb TABS_ALL – nicht zurücksetzen */
+    if(activeTab !== 'settings'){
+      const allowed = getActiveTabs().map(t => t[0]);
+      if(!allowed.includes(activeTab)) activeTab = allowed[0];
+    }
     renderTabs();
+    renderPanels();
+  } else if(isSettings){
+    /* Settings auch ohne Patienten öffnen – Tabs nicht anzeigen */
+    document.getElementById('tabs').innerHTML = '';
     renderPanels();
   }
 }
@@ -1504,8 +1512,8 @@ function renderPanels(){
   document.querySelectorAll('[data-panel]').forEach(s => s.classList.toggle('hidden', s.dataset.panel !== activeTab));
   const p = cur();
 
-  if(q('stamm')){
-    const currentGender = (cur().stamm?.gender || '').toLowerCase().trim();
+  if(q('stamm') && p){
+    const currentGender = (p.stamm?.gender || '').toLowerCase().trim();
     const isM = currentGender.startsWith('m');
     const isW = currentGender.startsWith('w') || currentGender.startsWith('f');
     /* Sitzungs-Nr. entfernt */
@@ -1530,7 +1538,7 @@ function renderPanels(){
       </div>`;
   }
 
-  if(q('anamnese')){
+  if(q('anamnese') && p){
     q('anamnese').innerHTML = `<h2>📝 Anamnese</h2>
 
       <h3>Diagnostizierte Vorerkrankungen <span class="smallMuted" style="font-weight:400; font-size:14px">– vom Arzt einzuschätzen</span></h3>
@@ -1541,11 +1549,11 @@ function renderPanels(){
       ${textarea('anamnese.notes','Anamnese-Anmerkungen')}`;
   }
 
-  if(q('evaluierung')){
+  if(q('evaluierung') && p){
     q('evaluierung').innerHTML = evalFull('evaluierung','📊 Evaluierung vor Therapie','Vollständiger Ausgangsfragebogen: Beschwerden, Schlaf/Stimmung und vegetative Symptome. Die End-Evaluierung enthält exakt dieselben Felder für den Vergleich.');
   }
 
-  if(q('planung')){
+  if(q('planung') && p){
     q('planung').innerHTML = `<h2>📅 Therapieplanung</h2>
       <div class="grid">
         ${input('planung.start','Therapiebeginn','date')}
@@ -1567,7 +1575,7 @@ function renderPanels(){
       ${maintenanceBlockHtml(p)}`;
   }
 
-  if(q('ende')){
+  if(q('ende') && p){
     /* Farbverlauf: dunkelgruen -> hellgruen -> orange -> hellrot -> dunkelrot
        Mit fest berechneten hellen Hintergrund-Farben fuer alte Browser */
     const comparisonOptions = [
@@ -1622,7 +1630,7 @@ function renderPanels(){
       ` + evalFull('ende','📋 Fragebogen nach Therapie','Exakt derselbe Fragebogen wie bei der Evaluierung vor Therapie.');
   }
 
-  if(q('auswertung')){
+  if(q('auswertung') && p){
     q('auswertung').innerHTML = `<h2>📈 Patienten-Auswertung</h2>
 
       <h3 style="margin-top:18px">Symptom-Veränderung im Detail</h3>
