@@ -1129,18 +1129,22 @@ function renderResearchPanel(){
   const counts = diagnosisCounts(dataset);
   const sortedDiags = Object.entries(counts).sort((a,b) => b[1] - a[1]);
 
-  /* Verfuegbare Filter-Werte:
-     - Geschlecht: IMMER alle 3 Optionen anzeigen (mit Patienten-Anzahl als Hinweis)
-     - Altersgruppe: nur die in dataset tatsaechlich vorkommenden */
-  /* Geschlechter aus ALLEN Patienten ermitteln (nicht nur auswertbaren),
-     damit man auch sieht/filtern kann, bevor Patienten "vollstaendig" sind */
-  const allGendersInDb = db.patients.map(p => genderNorm(p.stamm?.gender));
-  const genderCounts = {männlich:0, weiblich:0, divers:0};
-  allGendersInDb.forEach(g => { if(genderCounts[g] !== undefined) genderCounts[g]++; });
-  const datasetGenderCounts = {männlich:0, weiblich:0, divers:0};
-  dataset.forEach(d => { if(datasetGenderCounts[d.gender] !== undefined) datasetGenderCounts[d.gender]++; });
-  const availGenders = ['männlich','weiblich','divers'];
-  const availAgeGroups = [...new Set(dataset.map(d => d.ageGroup))].filter(g => g && g !== '?').sort();
+  /* Geschlechter und Altersgruppen aus ALLEN Patienten der Kartei (nicht nur auswertbare),
+     damit laufende Therapien nicht zu falschen "disabled"-Chips führen.
+     "divers" wird nicht mehr angezeigt (entfernt aus Stammdaten). */
+  const availGenders = ['männlich','weiblich'];
+  const genderCounts = {männlich:0, weiblich:0};
+  db.patients.forEach(p => {
+    const g = genderNorm(p.stamm?.gender);
+    if(genderCounts[g] !== undefined) genderCounts[g]++;
+  });
+  const datasetGenderCounts = {männlich:0, weiblich:0};
+  dataset.forEach(d => {
+    if(datasetGenderCounts[d.gender] !== undefined) datasetGenderCounts[d.gender]++;
+  });
+  /* Altersgruppen aus ALLEN Patienten der Kartei (nicht nur auswertbare) */
+  const allAgeGroups = db.patients.map(p => ageGroup(patientAge(p))).filter(g => g && g !== '?');
+  const availAgeGroups = [...new Set(allAgeGroups)].sort();
 
   let html = `<h2>📊 Forschungs-Auswertung</h2>
     <p class="smallMuted">Aggregierte Analyse über alle Patienten der Kartei. Ein Patient gilt als "auswertbar", wenn er mindestens 1 Beschwerde-Wert vor und nach Therapie sowie mindestens eine durchgeführte Sitzung hat.</p>
@@ -1176,18 +1180,26 @@ function renderResearchPanel(){
             const inDb = genderCounts[g] || 0;
             const inDataset = datasetGenderCounts[g] || 0;
             const isActive = researchFilters.genders.includes(g);
-            const disabled = inDataset === 0;
-            return `<span class="filterChip ${isActive?'active':''} ${disabled?'disabled':''}" data-filter="gender" data-value="${esc(g)}" ${disabled?'title="Keine auswertbaren Patienten mit diesem Geschlecht"':''}>${esc(g)} <small>(${inDataset}${inDb!==inDataset?'/'+inDb:''})</small></span>`;
+            const disabled = inDb === 0; /* nur ausgrauen wenn gar kein Patient dieses Geschlechts */
+            const label = inDataset < inDb ? `${inDataset}/${inDb}` : `${inDb}`;
+            const hint = inDataset < inDb ? `${inDb-inDataset} noch in Therapie` : '';
+            return `<span class="filterChip ${isActive?'active':''} ${disabled?'disabled':''}" data-filter="gender" data-value="${esc(g)}" ${hint?`title="${hint}"`:''}>${esc(g)} <small>(${label})</small></span>`;
           }).join('')}
         </div>
       </div>
 
       ${availAgeGroups.length ? `<div class="filterBlock">
-        <div class="filterLabel">Altersgruppe</div>
+        <div class="filterLabel">Altersgruppe <span class="smallMuted" style="font-weight:400">(alle Kartei-Patienten)</span></div>
         <div class="filterChips">
-          ${availAgeGroups.map(g => `<span class="filterChip ${researchFilters.ageGroups.includes(g)?'active':''}" data-filter="ageGroup" data-value="${esc(g)}">${esc(g)}</span>`).join('')}
+          ${availAgeGroups.map(g => {
+            const nAll = allAgeGroups.filter(x => x === g).length;
+            const nDataset = dataset.filter(d => d.ageGroup === g).length;
+            const hint = nDataset < nAll ? `${nDataset} auswertbar, ${nAll-nDataset} noch in Therapie` : '';
+            return `<span class="filterChip ${researchFilters.ageGroups.includes(g)?'active':''}" data-filter="ageGroup" data-value="${esc(g)}" ${hint?`title="${hint}"`:''}>${esc(g)} <small>(${nAll})</small></span>`;
+          }).join('')}
         </div>
       </div>`:''}
+
 
       <div class="filterBlock">
         <div class="filterLabel">Sitzungs-Anzahl (durchgeführt)</div>
