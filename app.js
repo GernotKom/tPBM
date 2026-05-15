@@ -5,19 +5,18 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
-const APP_VERSION = '1.20';
-const APP_RELEASE_DATE = '2026-05-10';
+const APP_VERSION = '1.21';
+const APP_RELEASE_DATE = '2026-05-15';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
 const TABS_ALL = [
   ['stamm','Stammdaten'],
   ['anamnese','Anamnese'],
-  ['evaluierung','Evaluierung vor Therapie'],
   ['planung','Therapieplanung'],
+  ['evaluierung','Evaluierung vor Therapie'],
   ['ende','End-Evaluierung'],
   ['auswertung','Auswertung'],
-  ['forschung','Forschungs-Auswertung'],
-  ['settings','Einstellungen']
+  ['forschung','Forschungs-Auswertung']
 ];
 const TABS_PATIENT = [
   ['evaluierung','Evaluierung vor Therapie'],
@@ -277,6 +276,9 @@ function ensureSettings(){
   /* Ordner-Pfad fuer Auto-Backup (informell - bei File System Access API
      wird das Handle in IndexedDB gespeichert, nicht hier; hier nur der Anzeige-Name) */
   if(db.settings.autoBackupFolderName === undefined) db.settings.autoBackupFolderName = '';
+  if(db.settings.refPdfUrl === undefined) db.settings.refPdfUrl = '';
+  if(db.settings.refPdfData === undefined) db.settings.refPdfData = '';
+  if(db.settings.refPdfName === undefined) db.settings.refPdfName = '';
 }
 ensureSettings();
 /* Migration: Alte Patienten ohne maintenance-Feld nachruesten */
@@ -530,6 +532,18 @@ function render(){
   /* "Export", "Drucken" für Patienten ausblenden */
   document.getElementById('exportBtn').style.display = userMode === 'patient' ? 'none' : '';
   document.getElementById('printBtn').style.display = userMode === 'patient' ? 'none' : '';
+  const settingsBtn2 = document.getElementById('settingsBtn');
+  if(settingsBtn2) settingsBtn2.style.display = userMode === 'patient' ? 'none' : '';
+  /* Patientenname im Header anzeigen (nur Patientenmodus) */
+  const patNameEl = document.getElementById('patientNameDisplay');
+  if(patNameEl){
+    if(userMode === 'patient' && cur() && cur().stamm?.name){
+      patNameEl.textContent = '👤 ' + cur().stamm.name;
+      patNameEl.style.display = '';
+    } else {
+      patNameEl.style.display = 'none';
+    }
+  }
 
   /* Neuer-Patient-Btn in Sidebar nur sichtbar im Stammdaten-Reiter */
   const newSb = document.getElementById('newPatientSidebarBtn');
@@ -606,8 +620,8 @@ function evalFull(prefix,title,intro){
     <h3>Schlaf &amp; Stimmung</h3>
     <div class="grid">
       ${sleepDurationField(prefix+'.sleepDuration','Durchschnittliche Schlafdauer')}
-      ${scale(prefix+'.sleepQuality','Schlafqualität')}
     </div>
+    ${scale(prefix+'.sleepQuality','Schlafqualität (0 = sehr schlecht, 10 = ausgezeichnet)')}
     <h3>Stimmung / Begleitbeschwerden</h3>
     ${chips(prefix+'.mood', mood)}
     <h3>Vegetative Symptome</h3>
@@ -806,7 +820,7 @@ function patientImprovement(p){
   });
 
   let symptomScore = null;
-  if(pairs.length >= 3){
+  if(pairs.length >= 1){
     const avgPre = pairs.reduce((a,b) => a + b.pre, 0) / pairs.length;
     const avgPost = pairs.reduce((a,b) => a + b.post, 0) / pairs.length;
     symptomScore = avgPre === 0 ? 0 : Math.round(((avgPre - avgPost) / avgPre) * 100);
@@ -1121,7 +1135,7 @@ function renderResearchPanel(){
   const availAgeGroups = [...new Set(dataset.map(d => d.ageGroup))].filter(g => g && g !== '?').sort();
 
   let html = `<h2>📊 Forschungs-Auswertung</h2>
-    <p class="smallMuted">Aggregierte Analyse über alle Patienten der Kartei. Ein Patient gilt als "auswertbar", wenn er mindestens 3 Beschwerde-Werte vor und nach Therapie sowie mindestens eine durchgeführte Sitzung hat.</p>
+    <p class="smallMuted">Aggregierte Analyse über alle Patienten der Kartei. Ein Patient gilt als "auswertbar", wenn er mindestens 1 Beschwerde-Wert vor und nach Therapie sowie mindestens eine durchgeführte Sitzung hat.</p>
     <div class="researchGrid">
       <div class="statCard"><div class="lbl">Patienten gesamt</div><div class="num">${total}</div></div>
       <div class="statCard"><div class="lbl">Auswertbar</div><div class="num">${evaluable}</div><div class="sub">${total ? Math.round(evaluable/total*100) : 0}% der Kartei</div></div>
@@ -1129,7 +1143,7 @@ function renderResearchPanel(){
     </div>`;
 
   if(evaluable < 1){
-    html += `<div class="researchWarn">⚠️ Noch keine auswertbaren Patientendaten. Patienten benötigen entweder Vor-/Nach-Evaluierung mit mindestens 3 Beschwerde-Skalen <i>oder</i> ein ausgefülltes End-Ergebnis-Feld – plus mindestens eine durchgeführte Sitzung mit Hz-Wert.</div>`;
+    html += `<div class="researchWarn">⚠️ Noch keine auswertbaren Patientendaten. Patienten benötigen entweder Vor-/Nach-Evaluierung mit mindestens 1 Beschwerde-Skala <i>oder</i> ein ausgefülltes End-Ergebnis-Feld – plus mindestens eine durchgeführte Sitzung mit Hz-Wert.</div>`;
     document.querySelector('[data-panel="forschung"]').innerHTML = html;
     return;
   }
@@ -1491,6 +1505,9 @@ function renderPanels(){
   const p = cur();
 
   if(q('stamm')){
+    const currentGender = (cur().stamm?.gender || '').toLowerCase().trim();
+    const isM = currentGender.startsWith('m');
+    const isW = currentGender.startsWith('w') || currentGender.startsWith('f');
     /* Sitzungs-Nr. entfernt */
     q('stamm').innerHTML = `<h2>📋 Stammdaten</h2>
       <div class="grid">
@@ -1500,17 +1517,6 @@ function renderPanels(){
         ${input('stamm.doctor','Behandelnde/r Arzt / Therapeut')}
         ${input('stamm.facility','Einrichtung / Praxis')}
       </div>
-      <p class="smallMuted" style="margin-top:4px">Hinweis: Geschlecht wird im Reiter „Anamnese" erfasst.</p>`;
-  }
-
-  if(q('anamnese')){
-    const currentGender = (cur().stamm?.gender || '').toLowerCase().trim();
-    const isM = currentGender.startsWith('m');
-    const isW = currentGender.startsWith('w') || currentGender.startsWith('f');
-    const isD = currentGender.startsWith('d') || currentGender.startsWith('div') || currentGender === 'x';
-
-    q('anamnese').innerHTML = `<h2>📝 Anamnese</h2>
-
       <h3>Geschlecht</h3>
       <div class="genderScale">
         <label class="genderOption ${isM?'active':''}">
@@ -1521,11 +1527,11 @@ function renderPanels(){
           <input type="radio" name="stamm.gender" data-path="stamm.gender" value="weiblich" ${isW?'checked':''}>
           <span>♀ Weiblich</span>
         </label>
-        <label class="genderOption ${isD?'active':''}">
-          <input type="radio" name="stamm.gender" data-path="stamm.gender" value="divers" ${isD?'checked':''}>
-          <span>⚥ Divers</span>
-        </label>
-      </div>
+      </div>`;
+  }
+
+  if(q('anamnese')){
+    q('anamnese').innerHTML = `<h2>📝 Anamnese</h2>
 
       <h3>Diagnostizierte Vorerkrankungen <span class="smallMuted" style="font-weight:400; font-size:14px">– vom Arzt einzuschätzen</span></h3>
       <p class="smallMuted" style="margin:-4px 0 8px">Nur durch behandelnde Ärztin/Arzt vergebene Diagnosen ankreuzen. Diese fließen optional in die statistische Forschungs-Auswertung ein (siehe Filter dort).</p>
@@ -1548,6 +1554,7 @@ function renderPanels(){
       <div class="topBtns">
         <button class="muted" id="refreshSessions">Sitzungsfenster aktualisieren</button>
         <button class="primary" id="applyProtocol">Vorschlag aus Diagnose übernehmen</button>
+        ${(db.settings.refPdfData || db.settings.refPdfUrl) ? `<button class="muted" id="openRefPdfPlan">📄 Weber Referenz-PDF öffnen</button>` : ''}
       </div>
       ${therapySuggestion()}
       <h3>Photosensitizer – Mehrfachauswahl</h3>${chips('planung.photos',photos)}
@@ -1637,6 +1644,19 @@ function renderPanels(){
 
   if(q('settings')){
     q('settings').innerHTML = `<h2>⚙️ Einstellungen</h2>
+      <h3>Referenz-Datei (Weber Therapy Book / Stufenschema)</h3>
+      <p class="smallMuted">Hinterlege die URL oder den lokalen Pfad zur Weber-Referenz-PDF. Der Link erscheint zusätzlich beim Button „Therapievorschlag erstellen" in der Therapieplanung.</p>
+      <div class="field">
+        <label>PDF-URL oder Datei-Link</label>
+        <input id="refPdfInput" type="text" placeholder="z.B. https://… oder file:///…" value="${esc(db.settings.refPdfUrl||'')}">
+      </div>
+      <div class="field">
+        <label>PDF hochladen (wird lokal gespeichert)</label>
+        <input id="refPdfFile" type="file" accept="application/pdf">
+        <small class="smallMuted">${db.settings.refPdfName ? '✓ Aktuell gespeichert: <b>'+esc(db.settings.refPdfName)+'</b>' : 'Noch keine PDF gespeichert.'}</small>
+      </div>
+      ${db.settings.refPdfData || db.settings.refPdfUrl ? `<button class="muted" id="openRefPdfBtn">📄 Referenz-PDF öffnen</button>  <button class="muted" id="clearRefPdfBtn">✕ Referenz entfernen</button>` : ''}
+
       <h3>Praxis (erscheint im Druck-Briefkopf)</h3>
       <div class="grid">
         ${input('__settings.praxisName','Praxis-Name')}
@@ -1693,7 +1713,6 @@ function renderPanels(){
           <label class="toggleSwitch">
             <input type="checkbox" id="autoBackupOnLockToggle" ${db.settings.autoBackupOnLock?'checked':''}>
             <span class="slider"></span>
-            <span class="toggleLabel">${db.settings.autoBackupOnLock?'beim Sperren wird gesichert':'kein Backup beim Sperren'}</span>
           </label>
         </div>
       </div>
@@ -2165,6 +2184,50 @@ function wireDynamic(){
 
   const ab = document.getElementById('anonBtn');
   if(ab) ab.onclick = exportAnon;
+
+  /* === Referenz-PDF === */
+  function openRefPdf(){
+    const url = db.settings.refPdfData || db.settings.refPdfUrl;
+    if(!url){ alert('Keine Referenz-PDF gespeichert. Bitte unter Einstellungen (⚙️) hinterlegen.'); return; }
+    window.open(url, '_blank');
+  }
+  const orp = document.getElementById('openRefPdfBtn');
+  if(orp) orp.onclick = openRefPdf;
+  const crp = document.getElementById('clearRefPdfBtn');
+  if(crp) crp.onclick = () => {
+    if(confirm('Referenz-PDF entfernen?')){
+      db.settings.refPdfData = ''; db.settings.refPdfUrl = ''; db.settings.refPdfName = '';
+      persist(); render();
+    }
+  };
+  const rpInput = document.getElementById('refPdfInput');
+  if(rpInput){
+    rpInput.onchange = () => {
+      db.settings.refPdfUrl = rpInput.value.trim();
+      persist();
+      showToast('PDF-Link gespeichert');
+    };
+  }
+  const rpFile = document.getElementById('refPdfFile');
+  if(rpFile){
+    rpFile.onchange = e => {
+      const f = e.target.files[0];
+      if(!f) return;
+      if(f.size > 10 * 1024 * 1024){ alert('PDF zu groß (max 10 MB). Bitte URL-Link verwenden.'); return; }
+      const r = new FileReader();
+      r.onload = () => {
+        db.settings.refPdfData = r.result;
+        db.settings.refPdfName = f.name;
+        db.settings.refPdfUrl = '';
+        persist(); render();
+        showToast('PDF gespeichert: ' + f.name);
+      };
+      r.readAsDataURL(f);
+    };
+  }
+  /* Referenz-PDF Button in Therapieplanung */
+  const orpp = document.getElementById('openRefPdfPlan');
+  if(orpp) orpp.onclick = openRefPdf;
 }
 
 /* ========================================================
@@ -2814,6 +2877,16 @@ document.getElementById('importSidebarFile').onchange = e => {
   handleImportFile(f);
   e.target.value = ''; /* Input zuruecksetzen, damit dieselbe Datei erneut importiert werden kann */
 };
+/* Zahnrad-Button: öffnet Einstellungen-Panel direkt */
+const settingsBtnEl = document.getElementById('settingsBtn');
+if(settingsBtnEl){
+  settingsBtnEl.onclick = () => {
+    if(userMode !== 'therapeut') return;
+    autosaveAndToast();
+    activeTab = 'settings';
+    render();
+  };
+}
 document.getElementById('lockBtn').onclick = async () => {
   saveForm();
   /* Optional: Backup beim Sperren erstellen, wenn aktiviert UND ungespeicherte Aenderungen */

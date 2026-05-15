@@ -373,7 +373,7 @@ canvas{width:100%;max-height:360px}
 /* === LOGIN-OVERLAY === */
 .lockOverlay{position:fixed;inset:0;background:linear-gradient(135deg,#795044,#b08968);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px}
 .lockBox{background:#fff;border-radius:24px;padding:32px;max-width:420px;width:100%;box-shadow:0 20px 60px #0006;text-align:center}
-.lockBox img{width:120px;height:120px;object-fit:contain;margin-bottom:8px}
+.lockBox img{width:72px;height:72px;object-fit:contain;flex-shrink:0}
 .lockBox h2{margin:0 0 8px;color:#795044}
 .lockBox p{margin:0 0 20px;color:#666;font-size:14px}
 .pinDisplay{font-size:32px;letter-spacing:14px;text-align:center;padding:14px;border:2px solid var(--line);border-radius:14px;margin-bottom:18px;min-height:62px;font-family:monospace}
@@ -481,10 +481,14 @@ canvas{width:100%;max-height:360px}
 <!-- LOGIN-OVERLAY -->
 <div id="lockOverlay" class="lockOverlay">
   <div class="lockBox">
-    <img id="lockLogo" alt="Logo">
-    <span class="lockMode">WeberBrain Evaluation</span>
-    <h2>Zugangscode</h2>
-    <p>4-stelligen PIN eingeben</p>
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:12px;text-align:left">
+      <img id="lockLogo" alt="Logo">
+      <div>
+        <span class="lockMode">WeberBrain Evaluation</span>
+        <h2 style="margin:4px 0 0">Zugangscode</h2>
+        <p style="margin:4px 0 0">4-stelligen PIN eingeben</p>
+      </div>
+    </div>
     <div id="pinDisplay" class="pinDisplay"></div>
     <div class="pinPad">
       <button class="pinBtn" data-pin="1">1</button>
@@ -513,8 +517,10 @@ canvas{width:100%;max-height:360px}
     </div>
   </div>
   <div class="topBtns">
+    <span id="patientNameDisplay" style="display:none;font-weight:800;font-size:15px;align-self:center;padding:6px 12px;background:#ffffff33;border-radius:10px"></span>
     <button class="muted" id="exportBtn">💾 Kartei-Sicherung</button>
     <button class="muted" id="printBtn">Drucken</button>
+    <button class="muted" id="settingsBtn" title="Einstellungen">⚙️</button>
     <button class="danger" id="lockBtn">🔒 Sperren</button>
   </div>
 </header>
