@@ -525,6 +525,11 @@ document.addEventListener('keydown', e => {
 function getActiveTabs(){
   return userMode === 'patient' ? TABS_PATIENT : TABS_ALL;
 }
+/* Wenn kein Patient: nur Forschung-Tab anzeigen */
+function getTabsForCurrentState(){
+  if(!cur() && userMode === 'therapeut') return [['forschung','Forschungs-Auswertung']];
+  return getActiveTabs();
+}
 
 function render(){
   if(userMode === null){ showLock(); return; }
@@ -554,8 +559,11 @@ function render(){
   renderList();
   const hasPatient = !!cur();
   const isSettings = activeTab === 'settings';
-  document.getElementById('empty').classList.toggle('hidden', hasPatient || isSettings);
-  document.getElementById('app').classList.toggle('hidden', !hasPatient && !isSettings);
+  const isForschung = activeTab === 'forschung';
+  /* Forschung + Settings sind auch ohne Patienten zugänglich */
+  const showApp = hasPatient || isSettings || isForschung;
+  document.getElementById('empty').classList.toggle('hidden', showApp);
+  document.getElementById('app').classList.toggle('hidden', !showApp);
   if(cur()){
     ensureShape();
     /* Settings ist ein Sonder-Tab außerhalb TABS_ALL – nicht zurücksetzen */
@@ -568,6 +576,10 @@ function render(){
   } else if(isSettings){
     /* Settings auch ohne Patienten öffnen – Tabs nicht anzeigen */
     document.getElementById('tabs').innerHTML = '';
+    renderPanels();
+  } else if(isForschung){
+    /* Forschung auch ohne Patienten öffnen – Tabs anzeigen (nur Forschung sichtbar) */
+    renderTabs();
     renderPanels();
   }
 }
@@ -590,7 +602,8 @@ function renderList(){
 function renderTabs(){
   const box = document.getElementById('tabs');
   box.innerHTML = '';
-  getActiveTabs().forEach(([id,label]) => {
+  const tabList = cur() ? getActiveTabs() : getTabsForCurrentState();
+  tabList.forEach(([id,label]) => {
     const b = document.createElement('button');
     b.className = 'tab ' + (id === activeTab ? 'active' : '');
     b.textContent = label;
@@ -646,7 +659,58 @@ function therapySuggestion(){
   const d = (p.anamnese.diagnoses||[]).find(x => protocols[x]);
   if(!d) return '<div class="notice">Keine passende Diagnose für automatischen Vorschlag gewählt. Bitte zuerst in der Anamnese eine Diagnose ankreuzen.</div>';
   const pr = protocols[d];
-  return `<div class="notice ok"><b>Therapievorschlag erkannt:</b> ${esc(pr.name)}<br>${pr.stages.map(st => `Sitzung ${st[0]}: ${st[1]||'—'} Hz · ${st[2]||'—'} % · ${st[3]||'—'} min · ${esc(st[4])}`).join('<br>')}</div>`;
+
+  /* Eigene Erfahrungswerte aus den Patientendaten für diese Diagnose */
+  const expBox = experienceHint(d);
+
+  return `<div class="notice ok">
+    <b>Therapievorschlag (Referenz-Protokoll):</b> ${esc(pr.name)}
+    <div style="margin-top:6px;line-height:1.7">
+      ${pr.stages.map(st => `<span style="display:block"><b>Sitzung ${esc(st[0])}:</b> ${st[1]||'—'} Hz &nbsp;·&nbsp; ${st[2]||'—'} % &nbsp;·&nbsp; ${st[3]||'—'} min &nbsp;–&nbsp; <em>${esc(st[4])}</em></span>`).join('')}
+    </div>
+  </div>
+  ${expBox}`;
+}
+
+/* Erfahrungshinterglas: eigene akkumulierte Werte aus der Kartei für diese Diagnose */
+function experienceHint(diagName){
+  /* Alle abgeschlossenen Patienten mit dieser Diagnose aus der lokalen Kartei */
+  const dataset = buildAnalysisDataset();
+  const sub = dataset.filter(d => d.diagnoses.includes(diagName));
+  if(sub.length < 1) return ''; /* keine eigenen Daten vorhanden */
+
+  /* Hz und Int: Modus (häufigster etablierter Wert) */
+  function modeLabel(vals, bins){
+    const opt = findOptimum(sub, vals, bins);
+    if(!opt.length) return '–';
+    /* Bester Bin mit mind. 1 Patient */
+    const best = opt.filter(o => o.n >= 1).sort((a,b) => (b.meanImprovement??-999)-(a.meanImprovement??-999))[0];
+    return best ? best.label + ' (n=' + best.n + ')' : '–';
+  }
+  function avgLabel(vals){
+    const v = sub.map(d => d[vals]).filter(x => x !== null && !isNaN(x));
+    if(!v.length) return '–';
+    return Math.round(v.reduce((a,b)=>a+b,0)/v.length) + (vals==='avgDuration' ? ' min' : '');
+  }
+
+  const impStats = sub.map(d => d.improvement).filter(x => !isNaN(x));
+  const avgImp = impStats.length ? Math.round(impStats.reduce((a,b)=>a+b,0)/impStats.length) : null;
+  const impColor = avgImp !== null ? (avgImp > 10 ? '#007a53' : avgImp < -10 ? '#b42a2a' : '#6b7280') : '#6b7280';
+
+  return `<div class="expHint">
+    <div class="expHintHead">
+      <span class="expHintIcon">📊</span>
+      <span>Eigene Erfahrungswerte &mdash; <b>${esc(diagName)}</b> &nbsp;(${sub.length} Patient${sub.length!==1?'en':''})</span>
+      ${avgImp !== null ? `<span class="expHintImp" style="color:\${impColor}">Ø \${avgImp>0?'+':''}\${avgImp}% Verbesserung</span>` : ''}
+    </div>
+    <div class="expHintGrid">
+      <div class="expHintItem"><div class="expHintLbl">Beste Frequenz</div><div class="expHintVal">\${modeLabel('avgHz', HZ_BINS)}</div></div>
+      <div class="expHintItem"><div class="expHintLbl">Beste Intensität</div><div class="expHintVal">\${modeLabel('avgIntensity', INT_BINS)}</div></div>
+      <div class="expHintItem"><div class="expHintLbl">Ø Dauer</div><div class="expHintVal">\${avgLabel('avgDuration')}</div></div>
+      <div class="expHintItem"><div class="expHintLbl">Ø Sitzungen</div><div class="expHintVal">\${avgLabel('sessions')}</div></div>
+    </div>
+    <div class="expHintNote">Basierend auf Ihren eigenen Patientendaten &mdash; zur Orientierung, kein Ersatz für das Referenzprotokoll.</div>
+  </div>`;
 }
 function applyProtocolToSessions(){
   saveForm();
@@ -834,19 +898,30 @@ function patientImprovement(p){
   return Math.round(symptomScore * 0.6 + subjectiveScore * 0.4);
 }
 
+/* Häufigster Wert (Modus) in einem Array von Zahlen */
+function modeOf(arr){
+  if(!arr.length) return null;
+  const freq = {};
+  arr.forEach(v => { freq[v] = (freq[v]||0)+1; });
+  return Number(Object.entries(freq).sort((a,b) => b[1]-a[1])[0][0]);
+}
+
 function patientSessionStats(p){
   const sessions = (p.planung?.sessions || []).filter(s => s.hz !== '' && s.hz !== undefined);
   if(!sessions.length) return null;
   const num = arr => arr.map(Number).filter(x => !isNaN(x));
   const avg = arr => arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : null;
-  const hzVals = num(sessions.map(s => String(s.hz).split(/[\/+,\s]/)[0]));
+  const hzVals  = num(sessions.map(s => String(s.hz).split(/[\/+,\s]/)[0]));
   const intVals = num(sessions.map(s => String(s.intensity).split(/[\/+,\u2013-]/)[0]));
   const durVals = num(sessions.map(s => String(s.duration).split(/[\/+,\u2013-]/)[0]));
   return {
     nSessions: sessions.length,
-    avgHz: avg(hzVals),
-    avgIntensity: avg(intVals),
-    avgDuration: avg(durVals)
+    /* avgHz / avgIntensity = Modus (häufigster Wert), damit Bin-Zuweisung zu etablierten
+       Werten (0/10/20/30/40 Hz, 25/50/75/100 %) korrekt ist, kein Durchschnitt */
+    avgHz:        modeOf(hzVals),
+    avgIntensity: modeOf(intVals),
+    /* Dauer und Sitzungsanzahl: Durchschnitt ist sinnvoll */
+    avgDuration:  avg(durVals)
   };
 }
 
