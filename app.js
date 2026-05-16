@@ -24,7 +24,7 @@ const TABS_PATIENT = [
 ];
 
 /* ---------- Datenlisten ---------- */
-const diagnoses = ['Alzheimer / Demenz','Parkinson','Schlaganfall','Depression','Angststörung','ADHS','Migräne / Kopfschmerz','Long COVID','SHT (Schädel-Hirn-Trauma)','PTBS','Schlafstörung','Multiple Sklerose','Epilepsie','Tinnitus','Burnout','Borreliose'];
+const diagnoses = ['Alzheimer / Demenz','Parkinson','Schlaganfall','Depression','Angststörung','ADHS','Migräne / Kopfschmerz','Long COVID','SHT (Schädel-Hirn-Trauma)','PTBS','Schlafstörung','Multiple Sklerose','Epilepsie','Tinnitus','Burnout','Borreliose','Neuroinflammation'];
 const symptoms = ['Erschöpfung / Fatigue','Kopfschmerzen / Migräne','Konzentrationsprobleme','Gedächtnisprobleme','Stimmungstiefs / Depression','Angst / innere Unruhe','Schlafstörungen','Brain Fog / Benommenheit','Schwindel','Zittern / Tremor'];
 /* "Soziale Isolation" entfernt */
 const mood = ['Antriebslosigkeit','Reizbarkeit'];
@@ -51,7 +51,8 @@ const protocols = {
   'Burnout':{name:'Burnout / Fatigue / Long COVID',stages:[['1–3','0','25','10–15','Zellregeneration; behutsam'],['4–10','10','25–50','20','Regulation Nervensystem'],['11+','10 + 40','50–75','30','Aktivierung nur morgens/mittags']]},
   'Multiple Sklerose':{name:'MS / Demyelinisierung',stages:[['1–3','0','25','10–15','Vorsichtig, Fatigue beobachten'],['4–10','10','25–50','20','Autonome Regulation'],['11+','10 / 40','50','20–25','Individuell nach Symptomdominanz']]},
   'Tinnitus':{name:'Tinnitus',stages:[['1–3','0','25','10–15','Reizarm starten'],['4–10','10','25–50','20','Autonome Regulation'],['11+','10','50','20–25','Verträglichkeit maßgeblich']]},
-  'Epilepsie':{name:'Epilepsie',stages:[['1–3','','','','Nur nach ärztlicher Rücksprache; Photosensitivität beachten'],['4–10','','','','Keine automatische Empfehlung'],['11+','','','','Individuelle ärztliche Verordnung erforderlich']]}
+  'Epilepsie':{name:'Epilepsie',stages:[['1–3','','','','Nur nach ärztlicher Rücksprache; Photosensitivität beachten'],['4–10','','','','Keine automatische Empfehlung'],['11+','','','','Individuelle ärztliche Verordnung erforderlich']]},
+  'Neuroinflammation':{name:'Neuroinflammation',stages:[['1–3','0','25','10–15','CW-Modus: Entzündungsreduktion, NF-κB-Hemmung; sehr behutsam starten'],['4–10','10','50','20','Alpha 10 Hz: glymphatische Clearance, Mikroglia-Modulation, autonome Balance'],['11+','10 + 40','50–75','25–30','10 Hz morgens (Regulation) + 40 Hz mittags (Gamma, Neuroprotektion); nie 40 Hz abends']]}
 };
 
 /* === ERHALTUNGS-PROTOKOLLE (Weber Protocol Book 2025) ===
@@ -74,7 +75,8 @@ const maintenanceProtocols = {
   'ADHS':                       {freq:1, weeks:24, note:'1×/Woche Erhaltung, idealerweise vormittags.'},
   'Multiple Sklerose':          {freq:2, weeks:52, note:'Symptomdominanz-abhängig 1–2×/Woche, dauerhaft.'},
   'Tinnitus':                   {freq:1, weeks:16, note:'1×/Woche solange Verträglichkeit gut bleibt.'},
-  'Epilepsie':                  {freq:0, weeks:0,  note:'Keine automatische Empfehlung – ärztliche Verordnung erforderlich.'}
+  'Epilepsie':                  {freq:0, weeks:0,  note:'Keine automatische Empfehlung – ärztliche Verordnung erforderlich.'},
+  'Neuroinflammation':           {freq:2, weeks:24, note:'Neuroinflammation erfordert kontinuierliche Stimulation. 2×/Woche für 6 Monate, danach individuell nach Symptomkontrolle.'}
 };
 
 /* Sucht in der Anamnese die erste passende Erhaltungs-Empfehlung */
@@ -946,17 +948,17 @@ function pearsonCorrelation(xs, ys){
 }
 
 const HZ_BINS = [
-  {label:'0 Hz (CW)', min:0,    max:0.5},
-  {label:'1–10 Hz',   min:0.5,  max:10.5},
-  {label:'11–20 Hz',  min:10.5, max:20.5},
-  {label:'21–30 Hz',  min:20.5, max:30.5},
-  {label:'31–40 Hz',  min:30.5, max:40.5},
-  {label:'41–50 Hz',  min:40.5, max:50.5},
-  {label:'51–60 Hz',  min:50.5, max:60.5},
-  {label:'61–70 Hz',  min:60.5, max:70.5},
-  {label:'71–80 Hz',  min:70.5, max:80.5},
-  {label:'81–90 Hz',  min:80.5, max:90.5},
-  {label:'91–100 Hz', min:90.5, max:1000}
+  {label:'0 Hz (CW)', min:0,   max:5},
+  {label:'10 Hz',     min:5,   max:15},
+  {label:'20 Hz',     min:15,  max:25},
+  {label:'30 Hz',     min:25,  max:35},
+  {label:'40 Hz',     min:35,  max:45},
+  {label:'50 Hz',     min:45,  max:55},
+  {label:'60 Hz',     min:55,  max:65},
+  {label:'70 Hz',     min:65,  max:75},
+  {label:'80 Hz',     min:75,  max:85},
+  {label:'90 Hz',     min:85,  max:95},
+  {label:'100 Hz',    min:95,  max:1000}
 ];
 const INT_BINS = [
   {label:'25%',  min:0,    max:37.5},
@@ -1230,6 +1232,13 @@ function renderResearchPanel(){
   </div>
 
   ${filtered.length < 1 ? `<div class="r2-warn">⚠️ Keine Patienten entsprechen den Filterkriterien.</div>` : `
+
+  <!-- ╔══ BEST-THERAPIE-FINDER ══╗ -->
+  <div class="r2-section r2-finder" id="r2FinderSection">
+    <div class="r2-sectionHead"><span class="r2-sectionIcon">🎯</span><h3>Optimale Therapie — Schnell-Übersicht</h3></div>
+    <p class="r2-sub" style="margin-bottom:12px">Die datenbasierte Empfehlung aus der gefilterten Patientengruppe. Aktualisiert sich automatisch mit jeder neuen Sitzung in der Kartei.</p>
+    <div id="r2FinderCards" class="r2-finderGrid"></div>
+  </div>
 
   <!-- ╔══ ZEILE 1: Verbesserungs-Verteilung + Diagnose-Vergleich ══╗ -->
   <div class="r2-row2">
@@ -1529,6 +1538,56 @@ function renderResearchPanel(){
   }
 
   /* ═══════════════════════════════════════════════
+     BEST-THERAPIE-FINDER
+     ═══════════════════════════════════════════════ */
+  const finderEl = document.getElementById('r2FinderCards');
+  if(finderEl && filtered.length >= 1){
+    /* Bestes Hz-Bin */
+    const hzOpt = findOptimum(filtered, 'avgHz', HZ_BINS);
+    const intOpt = findOptimum(filtered, 'avgIntensity', INT_BINS);
+    const durOpt = findOptimum(filtered, 'avgDuration', DUR_BINS);
+    const sesOpt = findOptimum(filtered, 'sessions', SES_BINS);
+
+    function bestBin(opt){
+      if(!opt.length) return null;
+      return opt.filter(o => o.n >= 1).reduce((a,b) => (b.meanImprovement??-999) > (a.meanImprovement??-999) ? b : a, opt[0]);
+    }
+    const bHz  = bestBin(hzOpt);
+    const bInt = bestBin(intOpt);
+    const bDur = bestBin(durOpt);
+    const bSes = bestBin(sesOpt);
+
+    /* Gesamterfolg der besten Kombination schätzen */
+    const topImp = impAll.mean;
+    const topColor = topImp > 20 ? '#007a53' : topImp > 5 ? '#2a7fc0' : '#6b7280';
+
+    const diagLabel = researchFilters.diagnosis ? `<b>${esc(researchFilters.diagnosis)}</b>` : 'alle Diagnosen';
+
+    function finderCard(icon, label, value, n, imp){
+      const hasData = value && n >= 1;
+      const impStr = imp !== null && imp !== undefined ? `Ø ${imp>0?'+':''}${Math.round(imp)}% Verbesserung` : '';
+      return `<div class="r2-finderCard">
+        <div class="r2-finderIcon">${icon}</div>
+        <div class="r2-finderLabel">${label}</div>
+        <div class="r2-finderVal">${hasData ? esc(value) : '–'}</div>
+        ${hasData && n ? `<div class="r2-finderN">n=${n} Patienten</div>` : ''}
+        ${hasData && impStr ? `<div class="r2-finderImp" style="color:${imp>10?'#007a53':imp<-5?'#b42a2a':'#6b7280'}">${impStr}</div>` : ''}
+      </div>`;
+    }
+
+    finderEl.innerHTML = `
+      <div class="r2-finderBanner">
+        Datengrundlage: <b>${filtered.length} Patient${filtered.length!==1?'en':''}</b> · ${diagLabel}
+        · Ø Gesamtverbesserung: <b style="color:${topColor}">${topImp>0?'+':''}${Math.round(topImp)}%</b>
+      </div>
+      ${finderCard('🔊', 'Beste Frequenz', bHz?.label, bHz?.n, bHz?.meanImprovement)}
+      ${finderCard('💡', 'Beste Intensität', bInt?.label, bInt?.n, bInt?.meanImprovement)}
+      ${finderCard('⏱️', 'Beste Dauer', bDur?.label, bDur?.n, bDur?.meanImprovement)}
+      ${finderCard('🔁', 'Optimale Sitzungsanzahl', bSes?.label, bSes?.n, bSes?.meanImprovement)}
+    `;
+  }
+
+  /* ═══════════════════════════════════════════════
      DIAGNOSE-ÜBERSICHTSTABELLE
      ═══════════════════════════════════════════════ */
   const diagTableEl = document.getElementById('r2DiagTable');
@@ -1571,11 +1630,7 @@ function renderResearchPanel(){
 function doResearchPrint(){
   const dt = new Date();
   document.getElementById('printDate').textContent = 'Forschungs-Auswertung · '+dt.toLocaleDateString('de-DE')+' '+dt.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
-  document.body.classList.add('printing-research');
-  setTimeout(() => {
-    window.print();
-    setTimeout(() => document.body.classList.remove('printing-research'), 500);
-  }, 50);
+  showPrintConfirm('research');
 }
 
 /* ============================================================
@@ -2909,6 +2964,18 @@ function dl(blob,name){
 /* Patientenbericht drucken: wechselt temporaer auf Auswertung,
    schaltet Modus 'printing-patient' an (nur Bericht sichtbar),
    ruft window.print() und stellt danach den vorherigen Tab wieder her */
+/* Globale Variable für den vorherigen Tab beim Drucken */
+let _printPreviousTab = null;
+
+/* Zeigt das Druck-Bestaetigungs-Overlay (loest direkt window.print() aus) */
+function showPrintConfirm(mode){
+  /* mode: 'patient' | 'research' */
+  const overlay = document.getElementById('printConfirmOverlay');
+  if(!overlay) return;
+  overlay._printMode = mode;
+  overlay.classList.add('visible');
+}
+
 function doPrint(){
   const p = cur();
   if(!p){ alert('Kein Patient ausgewählt.'); return; }
@@ -2919,25 +2986,15 @@ function doPrint(){
   const dt = new Date();
   document.getElementById('printDate').textContent = 'Patientenbericht · '+dt.toLocaleDateString('de-DE')+' '+dt.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'});
 
-  const previousTab = activeTab;
+  _printPreviousTab = activeTab;
   /* Auf Auswertung wechseln, damit der Bericht sicher im DOM ist */
   if(activeTab !== 'auswertung'){
     activeTab = 'auswertung';
     render();
   }
 
-  document.body.classList.add('printing-patient');
-  setTimeout(() => {
-    window.print();
-    setTimeout(() => {
-      document.body.classList.remove('printing-patient');
-      /* Zurueck zum vorherigen Tab */
-      if(previousTab && previousTab !== 'auswertung'){
-        activeTab = previousTab;
-        render();
-      }
-    }, 500);
-  }, 100);
+  /* Overlay anzeigen statt direkt zu drucken */
+  showPrintConfirm('patient');
 }
 
 /* ============================================================
@@ -3020,6 +3077,58 @@ if('serviceWorker' in navigator){
     navigator.serviceWorker.register('sw.js').catch(()=>{});
   });
 }
+
+/* === DRUCK-OVERLAY Events === */
+(function(){
+  const overlay = document.getElementById('printConfirmOverlay');
+  const cancelBtn = document.getElementById('printCancelBtn');
+  const confirmBtn = document.getElementById('printConfirmBtn');
+  if(!overlay) return;
+
+  function closeOverlay(){
+    overlay.classList.remove('visible');
+    /* Bei Patient: Body-Klasse entfernen und zurueck zum vorherigen Tab */
+    if(overlay._printMode === 'patient'){
+      document.body.classList.remove('printing-patient');
+      if(_printPreviousTab && _printPreviousTab !== 'auswertung'){
+        activeTab = _printPreviousTab;
+        render();
+      }
+    } else if(overlay._printMode === 'research'){
+      /* nichts rueckgaengig machen – research bleibt */
+    }
+    overlay._printMode = null;
+  }
+
+  if(cancelBtn) cancelBtn.onclick = closeOverlay;
+  /* Klick ausserhalb der Box = Abbrechen */
+  overlay.onclick = e => { if(e.target === overlay) closeOverlay(); };
+
+  if(confirmBtn) confirmBtn.onclick = () => {
+    overlay.classList.remove('visible');
+    const mode = overlay._printMode;
+    overlay._printMode = null;
+    if(mode === 'patient'){
+      document.body.classList.add('printing-patient');
+      setTimeout(() => {
+        window.print();
+        setTimeout(() => {
+          document.body.classList.remove('printing-patient');
+          if(_printPreviousTab && _printPreviousTab !== 'auswertung'){
+            activeTab = _printPreviousTab;
+            render();
+          }
+        }, 500);
+      }, 80);
+    } else if(mode === 'research'){
+      document.body.classList.add('printing-research');
+      setTimeout(() => {
+        window.print();
+        setTimeout(() => document.body.classList.remove('printing-research'), 500);
+      }, 50);
+    }
+  };
+})();
 
 /* === START: erst Lock anzeigen === */
 applyGlobalSettings();
