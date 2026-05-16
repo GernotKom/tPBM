@@ -493,6 +493,7 @@ canvas{width:100%;max-height:360px}
 .r2-filterNone{font-size:13px;opacity:.6;font-weight:400}
 .r2-filterGrid{display:grid;grid-template-columns:1fr 1fr;gap:16px;background:var(--muted);border:1px solid var(--line);border-radius:14px;padding:14px;margin:8px 0}
 @media(max-width:700px){.r2-filterGrid{grid-template-columns:1fr}}
+.r2-filterHint{font-size:11px;opacity:.55;font-weight:400;font-style:normal;margin-left:4px}
 .r2-filterCol{display:flex;flex-direction:column;gap:6px}
 .r2-filterLabel{font-weight:700;font-size:12px;letter-spacing:.06em;text-transform:uppercase;opacity:.7}
 .r2-chips{display:flex;flex-wrap:wrap;gap:6px}
@@ -500,6 +501,13 @@ canvas{width:100%;max-height:360px}
 .r2-chip:hover{border-color:var(--brand);transform:translateY(-1px)}
 .r2-chip.r2-chipActive{background:var(--brand);color:#fff;border-color:var(--brand)}
 .r2-chip em{font-style:normal;opacity:.75;font-size:11px}
+.r2-chip.r2-chipEmpty{background:var(--card);color:#aaa;border-color:#ddd;cursor:default;opacity:.7}
+.r2-chip.r2-chipEmpty:hover{transform:none;border-color:#ddd}
+.r2-chip.r2-chipEmpty em{opacity:.5}
+.r2-filterColFull{grid-column:1/-1}
+.r2-chipsWrap{flex-wrap:wrap;gap:6px}
+.r2-filterColSecondary{}
+.r2-filterRow{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
 
 /* KPI-Karten */
 .r2-kpiRow{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
@@ -541,12 +549,11 @@ canvas{width:100%;max-height:360px}
 
 /* Tabelle */
 .r2-tableWrap{overflow-x:auto;margin:8px 0}
-.r2-table{width:100%;border-collapse:collapse;font-size:13px}
-.r2-table{table-layout:fixed;width:100%}
-.r2-table th{background:var(--muted);font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:8px 10px;border-bottom:2px solid var(--line);text-align:left;white-space:normal}
-.r2-table th:first-child{width:28%;min-width:120px}
-.r2-table td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle;word-break:break-word}
-.r2-table td:first-child{font-weight:600;hyphens:auto}
+.r2-table{width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px}
+.r2-table th{background:var(--muted);font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.05em;padding:8px 10px;border-bottom:2px solid var(--line);text-align:left}
+.r2-table th.r2-tNum{text-align:right}
+.r2-table td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.r2-table td:first-child{white-space:normal;word-break:break-word;font-weight:600}
 .r2-table tr:last-child td{border-bottom:none}
 .r2-table tr:hover td{background:var(--muted)}
 .r2-tNum{text-align:right;font-variant-numeric:tabular-nums}

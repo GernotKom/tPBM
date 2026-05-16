@@ -1167,36 +1167,53 @@ function renderResearchPanel(){
       <button class="muted r2-smallBtn" id="resetFiltersBtn">↺ Zurücksetzen</button>
     </div>
     <div class="r2-filterGrid">
-      <div class="r2-filterCol">
-        <div class="r2-filterLabel">Diagnose</div>
-        <div class="r2-chips">
-          <span class="r2-chip ${!researchFilters.diagnosis?'r2-chipActive':''}" data-filter="diagnosis" data-value="">Alle</span>
-          ${sortedDiags.map(([d,n]) => `<span class="r2-chip ${d===researchFilters.diagnosis?'r2-chipActive':''}" data-filter="diagnosis" data-value="${esc(d)}">${esc(d)} <em>${n}</em></span>`).join('')}
+      <div class="r2-filterCol r2-filterColFull">
+        <div class="r2-filterLabel">Diagnose <span class="r2-filterHint">— alle bekannten Diagnosen · grau = noch keine auswertbaren Daten</span></div>
+        <div class="r2-chips r2-chipsWrap">
+          <span class="r2-chip ${!researchFilters.diagnosis?'r2-chipActive':''}" data-filter="diagnosis" data-value="">Alle <em>${evaluable}</em></span>
+          ${diagnoses.map(d => {
+            const n = counts[d] || 0;
+            const hasData = n > 0;
+            const active = d === researchFilters.diagnosis;
+            if(hasData){
+              return `<span class="r2-chip ${active?'r2-chipActive':''}" data-filter="diagnosis" data-value="${esc(d)}" title="${n} auswertbare Patient${n!==1?'en':''} mit dieser Diagnose">${esc(d)} <em>(${n})</em></span>`;
+            } else {
+              return `<span class="r2-chip r2-chipEmpty" data-filter="diagnosis" data-value="" data-nodata="1" title="Zu wenig Daten – noch keine abgeschlossenen Patienten mit dieser Diagnose">${esc(d)} <em>(0)</em></span>`;
+            }
+          }).join('')}
         </div>
       </div>
-      <div class="r2-filterCol">
-        <div class="r2-filterLabel">Geschlecht</div>
-        <div class="r2-chips">
-          ${['männlich','weiblich'].map(g => {
-            const active = researchFilters.genders.includes(g);
-            return `<span class="r2-chip ${active?'r2-chipActive':''}" data-filter="gender" data-value="${g}">${g} <em>${genderCounts[g]||0}</em></span>`;
-          }).join('')}
-        </div>
-        ${availAgeGroups.length ? `
-        <div class="r2-filterLabel" style="margin-top:10px">Altersgruppe</div>
-        <div class="r2-chips">
-          ${availAgeGroups.map(g => {
-            const active = researchFilters.ageGroups.includes(g);
-            const n = allAgeGroups.filter(x=>x===g).length;
-            return `<span class="r2-chip ${active?'r2-chipActive':''}" data-filter="ageGroup" data-value="${g}">${g} <em>${n}</em></span>`;
-          }).join('')}
-        </div>` : ''}
-        <div class="r2-filterLabel" style="margin-top:10px">Sitzungsanzahl</div>
-        <div class="r2-chips">
-          ${[['all','Alle',null,null],['1-5','1–5 Sitz.',1,5],['6-10','6–10 Sitz.',6,10],['11-20','11–20 Sitz.',11,20],['21+','21+ Sitz.',21,null]].map(([v,lbl,mn,mx]) => {
-            const active = (mn===researchFilters.minSessions && mx===researchFilters.maxSessions) || (v==='all' && researchFilters.minSessions===null && researchFilters.maxSessions===null);
-            return `<span class="r2-chip ${active?'r2-chipActive':''}" data-filter="sessions" data-value="${v}">${lbl}</span>`;
-          }).join('')}
+      <div class="r2-filterCol r2-filterColFull r2-filterColSecondary">
+        <div class="r2-filterRow">
+          <div>
+            <div class="r2-filterLabel">Geschlecht</div>
+            <div class="r2-chips">
+              ${['männlich','weiblich'].map(g => {
+                const active = researchFilters.genders.includes(g);
+                return `<span class="r2-chip ${active?'r2-chipActive':''}" data-filter="gender" data-value="${g}">${g} <em>${genderCounts[g]||0}</em></span>`;
+              }).join('')}
+            </div>
+          </div>
+          ${availAgeGroups.length ? `
+          <div>
+            <div class="r2-filterLabel">Altersgruppe</div>
+            <div class="r2-chips">
+              ${availAgeGroups.map(g => {
+                const active = researchFilters.ageGroups.includes(g);
+                const n = allAgeGroups.filter(x=>x===g).length;
+                return `<span class="r2-chip ${active?'r2-chipActive':''}" data-filter="ageGroup" data-value="${g}">${g} <em>${n}</em></span>`;
+              }).join('')}
+            </div>
+          </div>` : ''}
+          <div>
+            <div class="r2-filterLabel">Sitzungsanzahl</div>
+            <div class="r2-chips">
+              ${[['all','Alle',null,null],['1-5','1–5 Sitz.',1,5],['6-10','6–10 Sitz.',6,10],['11-20','11–20 Sitz.',11,20],['21+','21+ Sitz.',21,null]].map(([v,lbl,mn,mx]) => {
+                const active = (mn===researchFilters.minSessions && mx===researchFilters.maxSessions) || (v==='all' && researchFilters.minSessions===null && researchFilters.maxSessions===null);
+                return `<span class="r2-chip ${active?'r2-chipActive':''}" data-filter="sessions" data-value="${v}">${lbl}</span>`;
+              }).join('')}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -1331,6 +1348,11 @@ function renderResearchPanel(){
   /* ── Filter-Events ── */
   panel.querySelectorAll('.r2-chip').forEach(c => {
     c.onclick = () => {
+      /* Chips ohne Daten: kurze Rückmeldung, kein Filter-Wechsel */
+      if(c.dataset.nodata === '1'){
+        showToast('Noch keine auswertbaren Patienten mit dieser Diagnose');
+        return;
+      }
       const f = c.dataset.filter, v = c.dataset.value;
       if(f === 'diagnosis'){
         researchFilters.diagnosis = (v === '' ? null : v);
@@ -1613,11 +1635,20 @@ function renderResearchPanel(){
       </tr>`;
     }).join('');
     diagTableEl.innerHTML = `<table class="r2-table">
+      <colgroup>
+        <col style="width:30%">
+        <col style="width:8%">
+        <col style="width:12%">
+        <col style="width:13%">
+        <col style="width:12%">
+        <col style="width:13%">
+        <col style="width:12%">
+      </colgroup>
       <thead><tr>
         <th>Diagnose</th>
         <th class="r2-tNum">n</th>
         <th class="r2-tNum">Ø Verbess.</th>
-        <th class="r2-tNum">Erfolg&shy;squote</th>
+        <th class="r2-tNum">Erfolgsquote</th>
         <th class="r2-tNum">Ø Hz</th>
         <th class="r2-tNum">Ø Intensität</th>
         <th class="r2-tNum">Ø Dauer</th>
