@@ -623,9 +623,27 @@ function chips(path,arr){
   const vals = get(path) || [];
   return `<div class="chips">${arr.map(x => `<label class="chip"><input type="checkbox" data-array="${path}" value="${esc(x)}" ${vals.includes(x)?'checked':''}>${esc(x)}</label>`).join('')}</div>`;
 }
-function scale(path,label){
+function scale(path,label,opts){
   const val = get(path) || '';
-  return `<div class="field"><label>${label}</label><div class="scale">${Array.from({length:11},(_,i)=>`<label><input name="${path}" data-path="${path}" type="radio" value="${i}" ${String(val)===String(i)?'checked':''}>${i}</label>`).join('')}</div></div>`;
+  opts = opts || {};
+  /* direction: 'up' (default) = 0 ist gut/wenig, 10 ist schlecht/viel (Symptome).
+     'down' = 0 ist schlecht, 10 ist gut (z.B. Schlafqualitaet). */
+  const dir = opts.direction === 'down' ? 'down' : 'up';
+  /* preValue: Wert aus der Vor-Therapie-Evaluierung. Wird nur in der End-
+     Evaluierung gesetzt und markiert den entsprechenden Button hellgrau,
+     damit der Patient sieht, welche Punktzahl er vorher angegeben hat. */
+  const preRaw = (opts.preValue === undefined || opts.preValue === null || opts.preValue === '')
+                    ? null : String(opts.preValue);
+  /* Legende oberhalb der Skala fuer aeltere Patienten gut verstaendlich */
+  const legendText = dir === 'down'
+    ? '<span>0 = schlecht</span><span style="margin-left:auto">10 = gut</span>'
+    : '<span>0 = keine Beschwerden</span><span style="margin-left:auto">10 = sehr stark</span>';
+  const legend = `<div class="scaleLegend ${dir==='down'?'rev':''}">${legendText}<div class="lgBar" aria-hidden="true"></div></div>`;
+  const buttons = Array.from({length:11},(_,i)=>{
+    const isPre = preRaw !== null && preRaw === String(i);
+    return `<label data-val="${i}" data-dir="${dir}"${isPre?' class="preMark"':''}><input name="${path}" data-path="${path}" type="radio" value="${i}" ${String(val)===String(i)?'checked':''}>${i}</label>`;
+  }).join('');
+  return `<div class="field"><label>${label}</label>${legend}<div class="scale">${buttons}</div></div>`;
 }
 /* Schlafdauer als Auswahl-Buttons */
 function sleepDurationField(path,label){
@@ -635,16 +653,23 @@ function sleepDurationField(path,label){
 
 /* ---------- Evaluierungs-Block (vor + nach Therapie identisch) ---------- */
 function evalFull(prefix,title,intro){
+  /* Wenn dies die End-Evaluierung ist, holen wir die Vor-Therapie-Werte als
+     "preValue" fuer jede Skala. So sieht der Patient direkt, welche Punkt-
+     zahl er anfangs angegeben hat (hellgrau markiert). */
+  const isEnd = prefix === 'ende';
+  const preData = isEnd ? (cur().evaluierung || {values:{}}) : null;
+  const preVal = sym => isEnd ? preData.values?.[sym] : undefined;
+  const preSleepQuality = isEnd ? preData.sleepQuality : undefined;
   return `
     <h2>${title}</h2>
     <p>${intro}</p>
     <h3>Aktuelle Beschwerden (0 = keine Beschwerden, 10 = maximal)</h3>
-    ${symptoms.map(s => scale(prefix+'.values.'+s, s)).join('')}
+    ${symptoms.map(s => scale(prefix+'.values.'+s, s, {direction:'up', preValue:preVal(s)})).join('')}
     <h3>Schlaf &amp; Stimmung</h3>
     <div class="grid">
       ${sleepDurationField(prefix+'.sleepDuration','Durchschnittliche Schlafdauer')}
     </div>
-    ${scale(prefix+'.sleepQuality','Schlafqualität (0 = sehr schlecht, 10 = ausgezeichnet)')}
+    ${scale(prefix+'.sleepQuality','Schlafqualität (0 = sehr schlecht, 10 = ausgezeichnet)', {direction:'down', preValue:preSleepQuality})}
     <h3>Stimmung / Begleitbeschwerden</h3>
     ${chips(prefix+'.mood', mood)}
     <h3>Vegetative Symptome</h3>
@@ -1856,6 +1881,7 @@ function renderPanels(){
     }
 
     q('ende').innerHTML = `<h2>🏁 End-Evaluierung</h2>
+      <button class="backToStartBtn" id="backToStartEval" type="button">← Zurück zur Anfangsevaluierung (korrigieren)</button>
       <div class="grid">
         ${input('ende.count','Anzahl tatsächlich durchgeführter Sitzungen','number')}
         <div></div>
@@ -2207,6 +2233,19 @@ function wireDynamic(){
   if(ap) ap.onclick = applyProtocolToSessions;
   const rs = document.getElementById('refreshSessions');
   if(rs) rs.onclick = updateSessionCountFromField;
+
+  /* "Zurueck zur Anfangsevaluierung" Button in der End-Evaluierung:
+     speichert die aktuellen Eingaben und wechselt zum Tab 'evaluierung',
+     damit der Patient seine Anfangs-Punkte ggf. korrigieren kann. */
+  const back2start = document.getElementById('backToStartEval');
+  if(back2start){
+    back2start.onclick = () => {
+      saveForm();
+      activeTab = 'evaluierung';
+      render();
+      window.scrollTo({top:0, behavior:'smooth'});
+    };
+  }
 
   /* === MAINTENANCE-WIRING === */
   const mt = document.getElementById('maintenanceToggle');
