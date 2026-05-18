@@ -25,8 +25,8 @@ const TABS_PATIENT = [
 
 /* ---------- Datenlisten ---------- */
 const diagnoses = ['Alzheimer / Demenz','Parkinson','Schlaganfall','Depression','Angststörung','ADHS','Migräne / Kopfschmerz','Long COVID','SHT (Schädel-Hirn-Trauma)','PTBS','Schlafstörung','Multiple Sklerose','Epilepsie','Tinnitus','Burnout','Borreliose','Neuroinflammation'];
-const symptoms = ['Erschöpfung / Fatigue','Kopfschmerzen / Migräne','Konzentrationsprobleme','Gedächtnisprobleme','Stimmungstiefs / Depression','Angst / innere Unruhe','Schlafstörungen','Brain Fog / Benommenheit','Schwindel','Zittern / Tremor'];
-/* "Soziale Isolation" entfernt */
+const symptoms = ['Erschöpfung / Fatigue','Kopfschmerzen / Migräne','Konzentrationsprobleme','Gedächtnisprobleme','Stimmungstiefs / Depression','Angst / innere Unruhe','Brain Fog / Benommenheit','Schwindel','Zittern / Tremor'];
+/* "Soziale Isolation" entfernt, "Schlafstörungen" entfernt (durch Schlafqualitäts-Skala abgedeckt) */
 const mood = ['Antriebslosigkeit','Reizbarkeit'];
 const vegetative = ['Tinnitus','Sehstörungen','Lichtempfindlichkeit','Geräuschempfindlichkeit','Übelkeit','Herzrasen','Kribbeln / Taubheitsgefühl','Sprachprobleme'];
 const photos = ['Methylenblau','Curcumin liposomal','Riboflavin / Vitamin B2','Coenzym Q10 / Ubiquinol'];
