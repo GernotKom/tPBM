@@ -169,6 +169,214 @@ function resetProtocolsToBuiltin(){
   try { localStorage.removeItem(PROTOCOLS_LS_KEY); } catch(e){}
 }
 
+/* ============================================================
+   BUILT-IN STUFENSCHEMA-EDITOR
+   ------------------------------------------------------------
+   Modaler Dialog, mit dem die aktuell aktiven Protokolle direkt
+   editiert werden können. Speichert in localStorage (gleiche
+   Persistenz wie der JSON-Import), reagiert sofort auf die App.
+   ============================================================ */
+function openProtocolsEditor(){
+  /* Arbeits-Kopie, damit Abbrechen wirklich abbricht */
+  let draftAcute = JSON.parse(JSON.stringify(protocols));
+  let draftMaint = JSON.parse(JSON.stringify(maintenanceProtocols));
+  let activeTab = 'acute'; /* 'acute' | 'maintenance' */
+  let activeDiag = Object.keys(draftAcute)[0] || '';
+
+  /* Backdrop + Modal aufbauen */
+  const backdrop = document.createElement('div');
+  backdrop.className = 'protEditorBackdrop';
+  backdrop.innerHTML = '<div class="protEditorModal" role="dialog" aria-modal="true" aria-label="Stufenschema bearbeiten"><div class="protEditorBody"></div></div>';
+  document.body.appendChild(backdrop);
+  const body = backdrop.querySelector('.protEditorBody');
+
+  function close(){
+    backdrop.remove();
+    document.removeEventListener('keydown', onKey);
+  }
+  function onKey(e){ if(e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onKey);
+  backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
+
+  function renderEditor(){
+    const diagList = activeTab === 'acute' ? Object.keys(draftAcute) : Object.keys(draftMaint);
+    if(!diagList.includes(activeDiag)) activeDiag = diagList[0] || '';
+
+    body.innerHTML = `
+      <header class="protEditorHeader">
+        <h2>✏️ Stufenschema bearbeiten</h2>
+        <button class="protEditorClose" type="button" aria-label="Schließen">✕</button>
+      </header>
+
+      <div class="protEditorTabs">
+        <button type="button" class="protEditorTab ${activeTab==='acute'?'active':''}" data-tab="acute">Akut-Therapie (Sitzungen 1–3 / 4–10 / 11+)</button>
+        <button type="button" class="protEditorTab ${activeTab==='maintenance'?'active':''}" data-tab="maintenance">Erhaltungs-Therapie</button>
+      </div>
+
+      <div class="protEditorMain">
+        <aside class="protEditorList">
+          ${diagList.map(d => `<button type="button" class="protDiagBtn ${d===activeDiag?'active':''}" data-diag="${esc(d)}">${esc(d)}</button>`).join('')}
+        </aside>
+        <section class="protEditorForm">
+          ${activeTab === 'acute' ? renderAcuteForm() : renderMaintForm()}
+        </section>
+      </div>
+
+      <footer class="protEditorFooter">
+        <button type="button" class="muted protEditorResetDiag" title="Diese Diagnose auf den App-Default zurücksetzen">↺ Diese Diagnose zurücksetzen</button>
+        <span style="flex:1"></span>
+        <button type="button" class="muted protEditorCancel">Abbrechen</button>
+        <button type="button" class="protEditorSave">Speichern</button>
+      </footer>
+    `;
+
+    /* Tab-Wechsel */
+    body.querySelectorAll('.protEditorTab').forEach(btn => {
+      btn.onclick = () => {
+        activeTab = btn.dataset.tab;
+        const list = activeTab === 'acute' ? Object.keys(draftAcute) : Object.keys(draftMaint);
+        if(!list.includes(activeDiag)) activeDiag = list[0] || '';
+        renderEditor();
+      };
+    });
+
+    /* Diagnose-Wechsel */
+    body.querySelectorAll('.protDiagBtn').forEach(btn => {
+      btn.onclick = () => { commitForm(); activeDiag = btn.dataset.diag; renderEditor(); };
+    });
+
+    /* Buttons */
+    body.querySelector('.protEditorClose').onclick = close;
+    body.querySelector('.protEditorCancel').onclick = close;
+    body.querySelector('.protEditorSave').onclick = save;
+    body.querySelector('.protEditorResetDiag').onclick = resetDiag;
+
+    /* Live-Commit bei Änderungen, damit Tab-/Diag-Wechsel nichts verliert */
+    body.querySelectorAll('[data-editfield]').forEach(el => {
+      el.addEventListener('input', commitForm);
+    });
+  }
+
+  function renderAcuteForm(){
+    const p = draftAcute[activeDiag];
+    if(!p) return '<div class="notice">Keine Daten für diese Diagnose.</div>';
+    const stageLabels = ['Stufe 1 — Sitzungen 1–3 (Einstieg)','Stufe 2 — Sitzungen 4–10 (Aufbau)','Stufe 3 — Sitzungen 11+ (Erhaltung/Intensiv)'];
+    return `
+      <div class="protFormHead">
+        <h3>${esc(activeDiag)}</h3>
+        <label class="protFormName">Anzeigename
+          <input type="text" data-editfield data-key="name" value="${esc(p.name||activeDiag)}">
+        </label>
+      </div>
+      ${p.stages.map((st, idx) => `
+        <fieldset class="protStageBox">
+          <legend>${stageLabels[idx]||('Stufe '+(idx+1))}</legend>
+          <div class="protStageGrid">
+            <label>Sitzungen<input type="text" data-editfield data-stage="${idx}" data-col="0" value="${esc(st[0]||'')}" placeholder="z.B. 1–3"></label>
+            <label>Frequenz (Hz)<input type="text" data-editfield data-stage="${idx}" data-col="1" value="${esc(st[1]||'')}" placeholder="z.B. 40 oder 0"></label>
+            <label>Intensität (%)<input type="text" data-editfield data-stage="${idx}" data-col="2" value="${esc(st[2]||'')}" placeholder="z.B. 25 oder 50–75"></label>
+            <label>Dauer (min)<input type="text" data-editfield data-stage="${idx}" data-col="3" value="${esc(st[3]||'')}" placeholder="z.B. 20 oder 20–25"></label>
+          </div>
+          <label class="protNoteLbl">Anmerkung
+            <textarea data-editfield data-stage="${idx}" data-col="4" rows="2" placeholder="Hinweis / Begründung">${esc(st[4]||'')}</textarea>
+          </label>
+        </fieldset>
+      `).join('')}
+    `;
+  }
+
+  function renderMaintForm(){
+    const m = draftMaint[activeDiag];
+    if(!m) return '<div class="notice">Keine Daten für diese Diagnose.</div>';
+    return `
+      <div class="protFormHead">
+        <h3>${esc(activeDiag)} — Erhaltungs-Therapie</h3>
+      </div>
+      <div class="protStageGrid" style="margin-top:8px">
+        <label>Frequenz/Woche (Zahl, 0 = keine Empfehlung)<input type="number" min="0" max="14" data-editfield data-mkey="freq" value="${esc(m.freq ?? 0)}"></label>
+        <label>Dauer (Wochen, 52 = dauerhaft)<input type="number" min="0" max="520" data-editfield data-mkey="weeks" value="${esc(m.weeks ?? 0)}"></label>
+        <label>Frequenz Hz<input type="text" data-editfield data-mkey="hz" value="${esc(m.hz||'')}" placeholder="z.B. 40 oder 10 + 40"></label>
+        <label>Intensität %<input type="text" data-editfield data-mkey="intensity" value="${esc(m.intensity||'')}" placeholder="z.B. 75 oder 50–75"></label>
+        <label>Dauer/Sitzung (min)<input type="text" data-editfield data-mkey="duration" value="${esc(m.duration||'')}" placeholder="z.B. 30 oder 25–30"></label>
+        <label>Tageszeit<input type="text" data-editfield data-mkey="timing" value="${esc(m.timing||'')}" placeholder="z.B. täglich morgens"></label>
+      </div>
+      <label class="protNoteLbl">Sicherheitshinweis (optional)
+        <textarea data-editfield data-mkey="warning" rows="2" placeholder="Warnung / Kontraindikation">${esc(m.warning||'')}</textarea>
+      </label>
+      <label class="protNoteLbl">Begründung / Anmerkung
+        <textarea data-editfield data-mkey="note" rows="3" placeholder="Rationale">${esc(m.note||'')}</textarea>
+      </label>
+    `;
+  }
+
+  /* Schreibt aktuelle Formularwerte ins draft-Objekt */
+  function commitForm(){
+    if(!activeDiag) return;
+    if(activeTab === 'acute'){
+      const p = draftAcute[activeDiag];
+      if(!p) return;
+      const nameEl = body.querySelector('[data-key="name"]');
+      if(nameEl) p.name = nameEl.value;
+      body.querySelectorAll('[data-stage]').forEach(el => {
+        const s = parseInt(el.dataset.stage, 10);
+        const c = parseInt(el.dataset.col, 10);
+        if(!isNaN(s) && !isNaN(c) && p.stages[s]) p.stages[s][c] = el.value;
+      });
+    } else {
+      const m = draftMaint[activeDiag];
+      if(!m) return;
+      body.querySelectorAll('[data-mkey]').forEach(el => {
+        const k = el.dataset.mkey;
+        if(k === 'freq' || k === 'weeks'){
+          const n = parseInt(el.value, 10);
+          m[k] = isNaN(n) ? 0 : n;
+        } else {
+          m[k] = el.value;
+        }
+      });
+    }
+  }
+
+  function resetDiag(){
+    if(!activeDiag) return;
+    if(!confirm(`„${activeDiag}" auf den App-Default zurücksetzen?\n\nDie anderen Diagnosen bleiben unverändert. Erst beim Klick auf „Speichern" wird die Änderung übernommen.`)) return;
+    if(activeTab === 'acute'){
+      if(BUILTIN_PROTOCOLS[activeDiag]) draftAcute[activeDiag] = JSON.parse(JSON.stringify(BUILTIN_PROTOCOLS[activeDiag]));
+    } else {
+      if(BUILTIN_MAINTENANCE[activeDiag]) draftMaint[activeDiag] = JSON.parse(JSON.stringify(BUILTIN_MAINTENANCE[activeDiag]));
+    }
+    renderEditor();
+  }
+
+  function save(){
+    commitForm();
+    const data = {
+      _meta: {
+        schemaVersion: '1.0',
+        protocolVersion: 'custom-'+new Date().toISOString().slice(0,10),
+        releaseDate: new Date().toISOString().slice(0,10),
+        source: 'In-App-Editor',
+      },
+      protocols: draftAcute,
+      maintenanceProtocols: draftMaint
+    };
+    const err = validateProtocolsData(data);
+    if(err){ alert('Speichern fehlgeschlagen: '+err); return; }
+    try {
+      localStorage.setItem(PROTOCOLS_LS_KEY, JSON.stringify(data));
+    } catch(e){
+      alert('Speichern fehlgeschlagen (lokaler Speicher voll?).');
+      return;
+    }
+    applyProtocolsData(data, 'In-App-Editor');
+    close();
+    if(typeof showToast === 'function') showToast('Stufenschema gespeichert');
+    if(typeof render === 'function') render();
+  }
+
+  renderEditor();
+}
+
 /* Lädt im Hintergrund:
    - zuerst localStorage (sofort)
    - dann fetch von ./protocols.json (asynchron)
@@ -914,44 +1122,67 @@ function therapySuggestion(){
   ${expBox}`;
 }
 
-/* Erfahrungshinterglas: eigene akkumulierte Werte aus der Kartei für diese Diagnose */
+/* Erfahrungshinterglas: eigene akkumulierte Werte aus der Kartei für diese Diagnose.
+   - Empfehlungen für Hz/Intensität werden NUR aus Patienten mit positiver Verbesserung abgeleitet.
+   - Sind zu wenige (oder keine) positiven Daten vorhanden, wird "Noch keine Werte" angezeigt.
+   - Die durchschnittliche Verbesserung wird über ALLE Patienten dieser Diagnose ausgewiesen
+     (auch negative), weil das eine realistische Bilanz und keine Empfehlung ist. */
 function experienceHint(diagName){
-  /* Alle abgeschlossenen Patienten mit dieser Diagnose aus der lokalen Kartei */
   const dataset = buildAnalysisDataset();
   const sub = dataset.filter(d => d.diagnoses.includes(diagName));
-  if(sub.length < 1) return ''; /* keine eigenen Daten vorhanden */
+  if(sub.length < 1) return ''; /* keine eigenen Daten vorhanden – Block ganz ausblenden */
 
-  /* Hz und Int: Modus (häufigster etablierter Wert) */
+  const PLACEHOLDER = 'Noch keine Werte';
+  const MIN_POS_N = 2; /* mind. 2 positive Patienten, sonst keine Empfehlung */
+
+  /* Nur Patienten mit positiver Verbesserung für Empfehlungen heranziehen */
+  const positive = sub.filter(d => typeof d.improvement === 'number' && !isNaN(d.improvement) && d.improvement > 0);
+  const hasEnoughPositive = positive.length >= MIN_POS_N;
+
+  /* Hz und Int: Bin mit höchster mittlerer Verbesserung – nur aus positiven Fällen */
   function modeLabel(vals, bins){
-    const opt = findOptimum(sub, vals, bins);
-    if(!opt.length) return '–';
-    /* Bester Bin mit mind. 1 Patient */
-    const best = opt.filter(o => o.n >= 1).sort((a,b) => (b.meanImprovement??-999)-(a.meanImprovement??-999))[0];
-    return best ? best.label + ' (n=' + best.n + ')' : '–';
+    if(!hasEnoughPositive) return PLACEHOLDER;
+    const opt = findOptimum(positive, vals, bins);
+    if(!opt.length) return PLACEHOLDER;
+    /* Nur Bins mit mind. 1 positiven Patienten und einer auswertbaren mittleren Verbesserung */
+    const candidates = opt.filter(o => o.n >= 1 && typeof o.meanImprovement === 'number' && !isNaN(o.meanImprovement) && o.meanImprovement > 0);
+    if(!candidates.length) return PLACEHOLDER;
+    candidates.sort((a,b) => b.meanImprovement - a.meanImprovement);
+    const best = candidates[0];
+    return best.label + ' (n=' + best.n + ')';
   }
-  function avgLabel(vals){
-    const v = sub.map(d => d[vals]).filter(x => x !== null && !isNaN(x));
-    if(!v.length) return '–';
-    return Math.round(v.reduce((a,b)=>a+b,0)/v.length) + (vals==='avgDuration' ? ' min' : '');
+  function avgLabel(field){
+    /* Mittelwert nur über positive Verläufe – ohne mind. zwei keine Aussage */
+    if(!hasEnoughPositive) return PLACEHOLDER;
+    const v = positive.map(d => d[field]).filter(x => x !== null && !isNaN(x));
+    if(!v.length) return PLACEHOLDER;
+    return Math.round(v.reduce((a,b)=>a+b,0)/v.length) + (field==='avgDuration' ? ' min' : '');
   }
 
-  const impStats = sub.map(d => d.improvement).filter(x => !isNaN(x));
+  const impStats = sub.map(d => d.improvement).filter(x => typeof x === 'number' && !isNaN(x));
   const avgImp = impStats.length ? Math.round(impStats.reduce((a,b)=>a+b,0)/impStats.length) : null;
   const impColor = avgImp !== null ? (avgImp > 10 ? '#007a53' : avgImp < -10 ? '#b42a2a' : '#6b7280') : '#6b7280';
+
+  const headerCount = `${sub.length} Patient${sub.length!==1?'en':''}`
+    + (positive.length !== sub.length ? `, davon ${positive.length} mit Verbesserung` : '');
+
+  const noteText = hasEnoughPositive
+    ? 'Basierend auf eigenen Patientendaten mit positivem Verlauf &mdash; zur Orientierung, kein Ersatz für das Referenzprotokoll.'
+    : `Empfehlungen werden erst angezeigt, sobald mindestens ${MIN_POS_N} abgeschlossene Therapien mit positivem Verlauf (Verbesserung > 0&nbsp;%) vorliegen.`;
 
   return `<div class="expHint">
     <div class="expHintHead">
       <span class="expHintIcon">📊</span>
-      <span>Eigene Erfahrungswerte &mdash; <b>${esc(diagName)}</b> &nbsp;(${sub.length} Patient${sub.length!==1?'en':''})</span>
-      ${avgImp !== null ? `<span class="expHintImp" style="color:\${impColor}">Ø \${avgImp>0?'+':''}\${avgImp}% Verbesserung</span>` : ''}
+      <span>Eigene Erfahrungswerte &mdash; <b>${esc(diagName)}</b> &nbsp;(${headerCount})</span>
+      ${avgImp !== null ? `<span class="expHintImp" style="color:${impColor}">Ø ${avgImp>0?'+':''}${avgImp}% Verbesserung</span>` : ''}
     </div>
     <div class="expHintGrid">
-      <div class="expHintItem"><div class="expHintLbl">Beste Frequenz</div><div class="expHintVal">\${modeLabel('avgHz', HZ_BINS)}</div></div>
-      <div class="expHintItem"><div class="expHintLbl">Beste Intensität</div><div class="expHintVal">\${modeLabel('avgIntensity', INT_BINS)}</div></div>
-      <div class="expHintItem"><div class="expHintLbl">Ø Dauer</div><div class="expHintVal">\${avgLabel('avgDuration')}</div></div>
-      <div class="expHintItem"><div class="expHintLbl">Ø Sitzungen</div><div class="expHintVal">\${avgLabel('sessions')}</div></div>
+      <div class="expHintItem"><div class="expHintLbl">Beste Frequenz</div><div class="expHintVal">${modeLabel('avgHz', HZ_BINS)}</div></div>
+      <div class="expHintItem"><div class="expHintLbl">Beste Intensität</div><div class="expHintVal">${modeLabel('avgIntensity', INT_BINS)}</div></div>
+      <div class="expHintItem"><div class="expHintLbl">Ø Dauer</div><div class="expHintVal">${avgLabel('avgDuration')}</div></div>
+      <div class="expHintItem"><div class="expHintLbl">Ø Sitzungen</div><div class="expHintVal">${avgLabel('sessions')}</div></div>
     </div>
-    <div class="expHintNote">Basierend auf Ihren eigenen Patientendaten &mdash; zur Orientierung, kein Ersatz für das Referenzprotokoll.</div>
+    <div class="expHintNote">${noteText}</div>
   </div>`;
 }
 function applyProtocolToSessions(){
@@ -2166,22 +2397,33 @@ function renderPanels(){
       </div>
       ${db.settings.refPdfData || db.settings.refPdfUrl ? `<button class="muted" id="openRefPdfBtn">📄 Referenz-PDF öffnen</button>  <button class="muted" id="clearRefPdfBtn">✕ Referenz entfernen</button>` : ''}
 
-      <h3>Therapieprotokolle (automatisierte Empfehlungen)</h3>
-      <p class="smallMuted">Die App nutzt die Stufen- und Erhaltungs-Protokolle für die automatischen Therapievorschläge. Diese Werte können durch eine externe <code>protocols.json</code> aktualisiert werden – entweder als Datei neben der App (wird beim Start automatisch geladen) oder manuell importiert (überschreibt die Datei-Variante).</p>
+      <h3>Therapieprotokolle (Stufenschema – automatisierte Empfehlungen)</h3>
+      <p class="smallMuted">Die App nutzt das Stufenschema (Akut: Sitzung 1–3, 4–10, 11+) und die Erhaltungs-Protokolle für die automatischen Therapievorschläge. Werte können hier direkt editiert werden – Änderungen werden lokal gespeichert und bleiben bei jedem App-Start aktiv.</p>
       <div class="protocolStatusBox">
         <div><b>Aktive Quelle:</b> ${esc(PROTOCOLS_SOURCE)}</div>
         <div><b>Protokoll-Version:</b> ${esc(PROTOCOLS_VERSION)}${PROTOCOLS_DATE ? ' &nbsp;·&nbsp; <b>Stand:</b> '+esc(PROTOCOLS_DATE) : ''}</div>
         <div class="smallMuted" style="margin-top:6px">Anzahl Diagnosen: ${Object.keys(protocols).length} · Erhaltungsschemata: ${Object.keys(maintenanceProtocols).length}</div>
       </div>
-      <div class="field" style="margin-top:10px">
-        <label>Eigene <code>protocols.json</code> importieren (überschreibt App-Defaults dauerhaft)</label>
-        <input id="protocolsJsonFile" type="file" accept="application/json,.json">
-        <small class="smallMuted">Wird im Browser gespeichert und bei jedem App-Start aktiv. Format: <code>{ _meta, protocols, maintenanceProtocols }</code>.</small>
+
+      <div class="topBtns" style="margin-top:10px">
+        <button class="muted" id="openProtocolsEditorBtn">✏️ Stufenschema bearbeiten</button>
+        ${(localStorage.getItem(PROTOCOLS_LS_KEY) || PROTOCOLS_SOURCE.indexOf('Default') === -1) ? `<button class="muted" id="resetProtocolsBtn">↺ Auf App-Defaults zurücksetzen</button>` : ''}
       </div>
-      <div class="topBtns" style="margin-top:6px">
-        <button class="muted" id="downloadCurrentProtocolsBtn">💾 Aktuelle Protokolle als JSON sichern</button>
-        ${localStorage.getItem(PROTOCOLS_LS_KEY) ? `<button class="muted" id="resetProtocolsBtn">↺ Auf App-Defaults zurücksetzen</button>` : ''}
-      </div>
+
+      <details style="margin-top:10px">
+        <summary class="smallMuted" style="cursor:pointer">Erweitert: Protokolle als JSON-Datei importieren / exportieren</summary>
+        <div style="margin-top:8px;padding:10px;border:1px solid #ddd;border-radius:8px;background:#fafafa">
+          <p class="smallMuted" style="margin-top:0">Für Profis: Werte können auch als <code>protocols.json</code> ausgetauscht werden – z.&nbsp;B. um ein einheitliches Schema in mehreren Geräten zu synchronisieren.</p>
+          <div class="field">
+            <label>Eigene <code>protocols.json</code> importieren (überschreibt die aktuellen Werte)</label>
+            <input id="protocolsJsonFile" type="file" accept="application/json,.json">
+            <small class="smallMuted">Format: <code>{ _meta, protocols, maintenanceProtocols }</code></small>
+          </div>
+          <div class="topBtns" style="margin-top:6px">
+            <button class="muted" id="downloadCurrentProtocolsBtn">💾 Aktuelle Protokolle als JSON sichern</button>
+          </div>
+        </div>
+      </details>
 
       <h3>Praxis (erscheint im Druck-Briefkopf)</h3>
       <div class="grid">
@@ -2785,6 +3027,10 @@ function wireDynamic(){
   const orpp = document.getElementById('openRefPdfPlan');
   if(orpp) orpp.onclick = openRefPdf;
 
+  /* === Stufenschema-Editor (Built-in) === */
+  const openEditorBtn = document.getElementById('openProtocolsEditorBtn');
+  if(openEditorBtn) openEditorBtn.onclick = openProtocolsEditor;
+
   /* === Protokoll-JSON Import / Export / Reset === */
   const protocolsFile = document.getElementById('protocolsJsonFile');
   if(protocolsFile){
@@ -2881,6 +3127,55 @@ function handleImportFile(f){
 
       /* Format 3: Volles Backup (mit patients-Array) */
       if(data.patients && Array.isArray(data.patients)){
+        const incomingCount = data.patients.length;
+        const currentCount  = db.patients.length;
+
+        /* Wenn die Kartei leer ist, gibt es nichts zu fragen – einfach übernehmen */
+        let mode;
+        if(currentCount === 0){
+          mode = 'append';
+        } else {
+          /* Drei klare Optionen: komplett ersetzen, nur neue ergänzen, abbrechen */
+          const choice = prompt(
+            `Kartei-Sicherung erkannt: ${incomingCount} Patient${incomingCount!==1?'en':''} in der Datei.\n` +
+            `Aktuell in der Kartei: ${currentCount} Patient${currentCount!==1?'en':''}.\n\n` +
+            `Wie soll der Import erfolgen?\n` +
+            `  1 = Kartei komplett ÜBERSCHREIBEN (alle aktuellen Patienten werden ersetzt)\n` +
+            `  2 = Nur neue Patienten ERGÄNZEN (bereits vorhandene IDs bleiben unverändert)\n` +
+            `  3 = Abbrechen`,
+            '2'
+          );
+          if(choice === '1')      mode = 'replace';
+          else if(choice === '2') mode = 'append';
+          else                    return; /* Abbruch oder Eingabe abgebrochen */
+
+          if(mode === 'replace'){
+            const confirmReplace = confirm(
+              `Wirklich komplett überschreiben?\n\n` +
+              `Alle ${currentCount} aktuell gespeicherten Patient${currentCount!==1?'en':''} werden durch ` +
+              `die ${incomingCount} Patient${incomingCount!==1?'en':''} aus der Sicherung ersetzt.\n\n` +
+              `Diese Aktion kann nicht rückgängig gemacht werden.`
+            );
+            if(!confirmReplace) return;
+          }
+        }
+
+        if(mode === 'replace'){
+          /* Komplette Ersetzung: incoming-Liste wird zur neuen Kartei */
+          const newPatients = data.patients.map(np => {
+            if(!np.maintenance) np.maintenance = {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
+            return np;
+          });
+          db.patients = newPatients;
+          currentId = db.patients[0]?.id || null;
+          if(data.settings) db.settings = Object.assign({}, db.settings, data.settings);
+          ensureSettings();
+          persist(); applyGlobalSettings(); render();
+          alert(`Kartei komplett ersetzt: ${newPatients.length} Patient${newPatients.length!==1?'en':''} aus der Sicherung übernommen.`);
+          return;
+        }
+
+        /* mode === 'append': nur neue Patienten ergänzen (alte Standardlogik) */
         const existingIds = new Set(db.patients.map(x => x.id));
         let added = 0, skipped = 0;
         data.patients.forEach(np => {
@@ -2896,7 +3191,7 @@ function handleImportFile(f){
         if(data.settings) db.settings = Object.assign({}, db.settings, data.settings);
         ensureSettings();
         persist(); applyGlobalSettings(); render();
-        alert(`Kartei-Sicherung importiert: ${added} neue Patienten zur Kartei hinzugefügt, ${skipped} waren bereits vorhanden (unverändert). Gesamt: ${db.patients.length} Patienten.`);
+        alert(`Kartei-Sicherung importiert: ${added} neue Patient${added!==1?'en':''} hinzugefügt, ${skipped} waren bereits vorhanden (unverändert). Gesamt: ${db.patients.length} Patient${db.patients.length!==1?'en':''}.`);
         return;
       }
 
