@@ -5,7 +5,7 @@
    - Beim NÄCHSTEN Start ist die neue Version aktiv
    - Robuster als Network-first für eine Praxis-Anwendung */
 
-const CACHE = 'weberbrain-v1-21';
+const CACHE = 'weberbrain-v1-22';
 const ASSETS = [
   './',
   './index.html',

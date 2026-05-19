@@ -56,6 +56,20 @@ textarea{min-height:90px;resize:vertical}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 16px}
 .chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:999px;padding:10px 13px;background:var(--muted);font-weight:800}
 .chip input{width:auto}
+/* Vorher-Markierung bei Chips in der End-Evaluierung */
+.chip.preMark{position:relative;outline:2px dashed #6e6e6e;outline-offset:-2px;padding-bottom:14px}
+.chip.preMark::after{
+  content:"vorher";
+  position:absolute;
+  bottom:-7px;left:50%;transform:translateX(-50%);
+  background:#5a5a5a;color:#fff;
+  font-size:9px;font-weight:700;
+  padding:1px 6px;border-radius:8px;
+  letter-spacing:.04em;
+  pointer-events:none;
+  white-space:nowrap;
+}
+.chip.preMark:has(input:checked){outline-color:#1a1a1a}
 
 /* === Skala 0-10: groessere Touch-Targets fuer Tablet === */
 /* Skala 0-10: ALLE 11 Buttons IMMER in einer Zeile, gleichmaessig verteilt.
@@ -463,6 +477,8 @@ canvas{width:100%;max-height:360px}
 .pinBtn{padding:18px;font-size:24px;font-weight:800;background:var(--muted);border:0;border-radius:14px;cursor:pointer}
 .pinBtn:active{background:var(--brand2);color:#fff}
 .pinError{color:#b42a2a;font-weight:800;margin-top:10px;min-height:22px}
+.lockVersion{margin-top:14px;padding-top:10px;border-top:1px dashed var(--line);font-size:11px;color:#795044;opacity:.7;text-align:center;line-height:1.4;letter-spacing:.2px}
+.lockVersion b{font-weight:700}
 .lockMode{display:inline-block;padding:4px 10px;border-radius:999px;background:#795044;color:#fff;font-size:12px;font-weight:700;margin-bottom:6px}
 
 /* === RESPONSIVE === */
@@ -495,6 +511,8 @@ canvas{width:100%;max-height:360px}
   .scale label:has(input:checked),.sleepDuration label:has(input:checked),.scale label[data-val]:has(input:checked){background:#795044!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
   .scale label.preMark{outline:2px dashed #555!important}
   .scale label.preMark::after{background:#5a5a5a!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .chip.preMark{outline:2px dashed #555!important}
+  .chip.preMark::after{background:#5a5a5a!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 
   /* === FORSCHUNGS-AUSWERTUNG: nur dieses Panel drucken === */
   body.printing-research [data-panel]:not([data-panel="forschung"]){display:none!important}
@@ -545,6 +563,21 @@ canvas{width:100%;max-height:360px}
 .maintenanceBlock{margin-top:24px;padding:18px;background:var(--muted);border:1px solid var(--line);border-radius:14px;border-left:4px solid var(--brand)}
 .maintenanceHeader{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
 .maintenance-session{border-left:3px solid var(--brand2)}
+
+/* Erhaltungs-Parameter-Grid (indikationsspezifische Empfehlung) */
+.maintenanceParams{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:10px}
+.mpItem{background:rgba(255,255,255,.55);border:1px solid var(--line);border-radius:8px;padding:8px 10px;display:flex;flex-direction:column;gap:2px}
+.mpLbl{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;color:var(--brand);opacity:.85}
+.mpVal{font-size:14px;font-weight:600;color:#1f1611}
+.maintenanceWarn{margin-top:10px;padding:10px 12px;background:#fff5e6;border:1px solid #f0b87a;border-left:4px solid #d97706;border-radius:8px;font-size:13px;line-height:1.5;color:#7a3e08}
+
+/* Versionsanzeige unten in der Sidebar (permanent sichtbar) */
+.sidebarVersion{margin-top:12px;padding:6px 4px 0;border-top:1px dashed var(--line);font-size:11px;color:var(--brand);opacity:.65;text-align:center;line-height:1.4;letter-spacing:.2px}
+.sidebarVersion b{font-weight:700}
+
+/* Protokoll-Quellen-Statusbox (in Einstellungen) */
+.protocolStatusBox{margin-top:8px;padding:10px 12px;background:rgba(255,255,255,.45);border:1px solid var(--line);border-left:3px solid var(--brand);border-radius:8px;font-size:13px;line-height:1.6}
+.protocolStatusBox code{background:rgba(0,0,0,.06);padding:1px 5px;border-radius:4px;font-size:.92em}
 
 /* Toggle-Switch - iOS-Style */
 .toggleSwitch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
@@ -741,6 +774,7 @@ canvas{width:100%;max-height:360px}
       <button class="pinBtn" id="pinOk" style="background:#0b6cf0;color:#fff">OK</button>
     </div>
     <div id="pinError" class="pinError"></div>
+    <div class="lockVersion" id="lockVersion" title="Version wird beim Start gesetzt"></div>
   </div>
 </div>
 
@@ -787,6 +821,7 @@ canvas{width:100%;max-height:360px}
       <input id="importSidebarFile" type="file" accept="application/json" class="hidden">
     </div>
     <div class="notice ok"><b>DSGVO:</b> Daten werden lokal in diesem Browser gespeichert. Regelmäßig Backup exportieren.</div>
+    <div class="sidebarVersion" id="sidebarVersion" title="Version wird beim Start gesetzt"></div>
   </aside>
   <main class="card">
     <div id="empty"><h2>Kein Patient ausgewählt</h2><p>Bitte „Neuer Patient" wählen oder bestehenden Patienten öffnen.</p></div>

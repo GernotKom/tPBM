@@ -5,8 +5,15 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
-const APP_VERSION = '1.21';
-const APP_RELEASE_DATE = '2026-05-15';
+/* Sicherheits-Snapshot: rotierender zweiter Speicher-Slot. Sollte der
+   Haupt-Key durch einen abgebrochenen Schreibvorgang, einen Browser-Crash
+   oder ein QuotaExceededError korrupt sein, kann beim Start aus dem
+   Snapshot wiederhergestellt werden. Der Snapshot wird jeweils einen
+   Persist-Vorgang VOR dem aktuellen Stand geschrieben (also der vor-
+   letzte gute Stand). */
+const KEY_SNAPSHOT = 'weberbrain_clean_v4_snapshot';
+const APP_VERSION = '1.24';
+const APP_RELEASE_DATE = '2026-05-19';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
 const TABS_ALL = [
@@ -35,8 +42,23 @@ const supplements = ['Sonnenmoor / Trinkmoor','Shilajit / Mumijo','Omega 3','Mag
 /* Schlafdauer als feste Optionen (Patient kann nur ankreuzen) */
 const SLEEP_OPTIONS = ['<5h','5-7h','7-9h','>9h'];
 
+/* ----------------------------------------------------------------------------
+   Therapieprotokolle (eingebaute Defaults)
+   ----------------------------------------------------------------------------
+   Diese Werte werden beim App-Start ggf. überschrieben durch:
+     1. Eine manuell unter Einstellungen importierte JSON (localStorage)
+     2. Eine im App-Verzeichnis abgelegte protocols.json (fetch beim Start)
+   Falls keine externe Datei vorhanden ist, gelten weiterhin diese Defaults.
+   Reihenfolge der Präzedenz: localStorage > protocols.json > Defaults.
+---------------------------------------------------------------------------- */
+let PROTOCOLS_SOURCE = 'Defaults (App V'+/*placeholder*/'?'+')'; /* wird vom Loader gesetzt */
+let PROTOCOLS_VERSION = '1.4-builtin';
+let PROTOCOLS_DATE = '';
+
+const PROTOCOLS_LS_KEY = 'weberbrain_protocols_override';
+
 /* ---------- Therapieprotokolle ---------- */
-const protocols = {
+let protocols = {
   'Alzheimer / Demenz':{name:'Alzheimer / Demenz',stages:[['1–3','40','25','15','Einstieg: Verträglichkeit prüfen, Gamma-Entrainment initiieren'],['4–10','40','50–75','20–25','Aufbau: kognitive Aktivierung'],['11+','40','75–100','30','Erhaltung: tägliche Heimanwendung erwägen']]},
   'Parkinson':{name:'Parkinson',stages:[['1–3','40','25','15','Vorsichtiger Einstieg; Tremor/Gleichgewicht beobachten'],['4–10','40','50–75','20–25','Aufbau: Motorik und Kognition'],['11+','40 + 10','75–100','30','Morgens 40 Hz, abends 10 Hz bei Schlaf/Angst']]},
   'Schlaganfall':{name:'Schlaganfall',stages:[['1–3','0','25','10–15','CW, zellreparativ; früh vorsichtig'],['4–10','10 / 40','50','20','10 Hz emotional, 40 Hz kognitiv'],['11+','40','75','25–30','Neuroplastizität / chronische Phase']]},
@@ -55,28 +77,35 @@ const protocols = {
   'Neuroinflammation':{name:'Neuroinflammation',stages:[['1–3','0','25','10–15','CW-Modus: Entzündungsreduktion, NF-κB-Hemmung; sehr behutsam starten'],['4–10','10','50','20','Alpha 10 Hz: glymphatische Clearance, Mikroglia-Modulation, autonome Balance'],['11+','10 + 40','50–75','25–30','10 Hz morgens (Regulation) + 40 Hz mittags (Gamma, Neuroprotektion); nie 40 Hz abends']]}
 };
 
-/* === ERHALTUNGS-PROTOKOLLE (Weber Protocol Book 2025) ===
-   Pro Diagnose: Empfehlung für Frequenz pro Woche und Gesamtdauer.
-   Bei dauerhaften Erhaltungstherapien (Demenz, Parkinson) werden 52 Wochen
-   als Default genommen, kann beliebig erhoeht/erneuert werden.
-   note erscheint im UI als Begruendungstext fuer die Empfehlung. */
-const maintenanceProtocols = {
-  'Alzheimer / Demenz':         {freq:2, weeks:52, note:'Neurodegenerativ – glymphatische Clearance braucht kontinuierliche Stimulation. Dauerhaft 1–2×/Woche, kein Absetzen empfohlen.'},
-  'Parkinson':                  {freq:2, weeks:52, note:'Neurodegenerativ – dauerhaft 1–2×/Woche, kein Absetzen empfohlen.'},
-  'Schlaganfall':               {freq:2, weeks:36, note:'Nach Akutphase 1–2×/Woche für 6–12 Monate. Bei chronischen Defiziten ggf. dauerhaft fortsetzen.'},
-  'Depression':                 {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, danach individuell auf alle 2 Wochen reduzieren.'},
-  'Angststörung':               {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, dann individuell ausschleichen.'},
-  'PTBS':                       {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, in Abstimmung mit Traumatherapie.'},
-  'Long COVID':                 {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate. PEM weiter beobachten.'},
-  'Burnout':                    {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, dann nach Bedarf.'},
-  'SHT (Schädel-Hirn-Trauma)':  {freq:1, weeks:24, note:'1×/Woche für 6 Monate. Bei chronischem TBI längere Erhaltung.'},
-  'Schlafstörung':              {freq:1, weeks:12, note:'Bei Bedarf 1×/Woche, abendlich vor dem Schlafengehen.'},
-  'Migräne / Kopfschmerz':      {freq:1, weeks:24, note:'1×/Woche prophylaktisch. Nicht während akuter Attacke.'},
-  'ADHS':                       {freq:1, weeks:24, note:'1×/Woche Erhaltung, idealerweise vormittags.'},
-  'Multiple Sklerose':          {freq:2, weeks:52, note:'Symptomdominanz-abhängig 1–2×/Woche, dauerhaft.'},
-  'Tinnitus':                   {freq:1, weeks:16, note:'1×/Woche solange Verträglichkeit gut bleibt.'},
-  'Epilepsie':                  {freq:0, weeks:0,  note:'Keine automatische Empfehlung – ärztliche Verordnung erforderlich.'},
-  'Neuroinflammation':           {freq:2, weeks:24, note:'Neuroinflammation erfordert kontinuierliche Stimulation. 2×/Woche für 6 Monate, danach individuell nach Symptomkontrolle.'}
+/* === ERHALTUNGS-PROTOKOLLE (Stufenschema V1.4 / Weber Protocol Book 2025) ===
+   Pro Diagnose indikationsspezifische Erhaltungs-Empfehlung mit:
+     freq        = Sitzungen pro Woche (0 = keine automatische Empfehlung)
+     weeks       = Dauer in Wochen (52 = dauerhaft empfohlen)
+     hz          = Frequenz-Empfehlung für Erhaltung (Text, kann Wechsel enthalten)
+     intensity   = Intensität in % (Text, kann Spanne enthalten)
+     duration    = Sitzungsdauer in Minuten (Text, kann Spanne enthalten)
+     timing      = Tageszeit-Hinweis ('' = flexibel)
+     warning     = Sicherheitshinweis / Kontraindikation (leer wenn keine)
+     note        = Begründung der Empfehlung
+   Quelle: WeberBrain Stufenschema V1.4 (Stufe 3 = Erhaltung / Intensiv)
+*/
+let maintenanceProtocols = {
+  'Alzheimer / Demenz':         {freq:7, weeks:52, hz:'40', intensity:'75–100', duration:'30', timing:'täglich (Heimanwendung)', warning:'Absetzen führt zu Rückfall – Dauertherapie empfohlen.', note:'Neurodegenerativ – tägliche Heimanwendung entscheidend. 40 Hz Gamma-Entrainment für glymphatische Amyloid-Clearance.'},
+  'Parkinson':                  {freq:7, weeks:52, hz:'40 (morgens) + 10 (abends)', intensity:'75–100', duration:'30', timing:'täglich – Wechsel je Tageszeit', warning:'', note:'Neurodegenerativ – dauerhafte Stimulation. Morgens 40 Hz (Motorik/Kognition), abends 10 Hz (Schlaf/Angst).'},
+  'Schlaganfall':               {freq:6, weeks:36, hz:'40', intensity:'75', duration:'25–30', timing:'5–7×/Woche', warning:'', note:'Chronische Phase: Neuroplastizität, Verbesserung funktioneller Konnektivität. Bei chronischen Defiziten ggf. dauerhaft fortsetzen.'},
+  'Depression':                 {freq:7, weeks:16, hz:'0 → 10 (sequenziell)', intensity:'75', duration:'30', timing:'täglich, morgens', warning:'NIEMALS 40 Hz bei reiner Depression – kann Anspannung und Grübeln verstärken. NIEMALS abends – 10 Hz abends kann Einschlafstörungen verursachen.', note:'Optimales Erhaltungsprotokoll: 15 min 0 Hz (Aufwärmung) + 15 min 10 Hz (Alpha frontal). Nach 3–6 Monaten individuell auf alle 2 Wochen reduzieren.'},
+  'Angststörung':               {freq:7, weeks:16, hz:'10', intensity:'50–75', duration:'25–30', timing:'täglich, morgens', warning:'Hyperarousal möglich – nicht zu schnell steigern.', note:'Dauerprotokoll Alpha 10 Hz; nach Stabilisierung individuell ausschleichen. Morgens bevorzugen (Cortisol-Rhythmus).'},
+  'PTBS':                       {freq:7, weeks:16, hz:'10', intensity:'50–75', duration:'25–30', timing:'täglich, morgens', warning:'Reaktivierung möglich – Sitzungszeit nur schrittweise steigern. Immer in Kombination mit Traumatherapie (EMDR, TF-KVT).', note:'PTBS-Erhaltung: Alpha 10 Hz langfristig in Abstimmung mit Traumatherapie.'},
+  'Long COVID':                 {freq:7, weeks:16, hz:'10 (morgens) + 40 (mittags)', intensity:'50–75', duration:'30', timing:'täglich – nie 40 Hz abends', warning:'PEM (Post-Exertional Malaise) beachten: keine Überstimulation. Bei Verschlechterung sofort auf 0 Hz zurück und Intensität halbieren.', note:'10 Hz morgens (Regulation), 40 Hz mittags (Kognition). Neuroinflammatorische Komponente – HRV-Monitoring empfohlen.'},
+  'Burnout':                    {freq:7, weeks:16, hz:'10 (morgens) + 40 (mittags)', intensity:'50–75', duration:'30', timing:'täglich – nie 40 Hz abends', warning:'Aktivierung nur morgens/mittags – abends 40 Hz verschlechtert Schlaf.', note:'10 Hz morgens (autonome Regulation), 40 Hz mittags (Kognition). Nach 3–6 Monaten nach Bedarf.'},
+  'SHT (Schädel-Hirn-Trauma)':  {freq:7, weeks:24, hz:'40', intensity:'75', duration:'25–30', timing:'täglich (Heimanwendung)', warning:'Rückfall nach Therapieende dokumentiert → Heimtherapie empfehlen. Bei Post-Concussion niedriger starten.', note:'Chronisches TBI: Default-Mode-Network gezielt stimulieren. Kognitive Testbatterie alle 4 Wochen.'},
+  'Schlafstörung':              {freq:7, weeks:12, hz:'10 → 0 (sequenziell)', intensity:'50', duration:'25–30', timing:'täglich abends (1–2 h vor Schlaf)', warning:'NIEMALS 40 Hz abends – aktivierend, verschlechtert Schlaf.', note:'15 min 10 Hz, dann 15 min CW als Übergang in Schlafvorbereitung. Im Liegen, abgedunkelt.'},
+  'Migräne / Kopfschmerz':      {freq:7, weeks:24, hz:'0 (CW, kein Puls)', intensity:'50', duration:'20–25', timing:'täglich (Prophylaxe), tageszeit-flexibel', warning:'NIEMALS 10 Hz oder 40 Hz – gepulstes Licht kann kortikale Spreading Depression auslösen und Attacken triggern. Nicht während aktiver Attacke. < 48 h nach Attacke: max. 25 %, max. 15 min.', note:'Langzeitprophylaxe: Reduktion Attackenfrequenz und -intensität. Triggertagebuch parallel führen.'},
+  'ADHS':                       {freq:7, weeks:24, hz:'40 (morgens) + 10 (abends)', intensity:'50–75', duration:'25–30', timing:'täglich – Wechsel je Tageszeit', warning:'Kinder: max. 50 % Intensität unter 12 Jahren.', note:'Morgens 40 Hz (Fokus, Exekutivfunktionen), abends 10 Hz (Entspannung/Schlaf). Begleitend Neurofeedback sinnvoll.'},
+  'Multiple Sklerose':          {freq:5, weeks:52, hz:'10 / 40 (individuell)', intensity:'50', duration:'20–25', timing:'5×/Woche', warning:'Fatigue beobachten – bei Verschlechterung Intensität reduzieren.', note:'Symptomdominanz-abhängig: 10 Hz bei autonomer Dysregulation, 40 Hz bei kognitiven Defiziten. Dauerhaft.'},
+  'Tinnitus':                   {freq:5, weeks:16, hz:'10', intensity:'50', duration:'20–25', timing:'5×/Woche', warning:'Verträglichkeit maßgeblich – bei Tinnitus-Zunahme sofort pausieren.', note:'1×/Woche solange Verträglichkeit gut bleibt. Reizarme Anwendung.'},
+  'Epilepsie':                  {freq:0, weeks:0,  hz:'—', intensity:'—', duration:'—', timing:'—', warning:'NUR nach ärztlicher Rücksprache und individueller Verordnung. Photosensitivität strikt beachten.', note:'Keine automatische Empfehlung – ärztliche Verordnung erforderlich.'},
+  'Neuroinflammation':          {freq:7, weeks:52, hz:'10 (morgens) + 40 (mittags)', intensity:'50–75', duration:'25–30', timing:'täglich – nie 40 Hz abends', warning:'Bei Verschlechterung (Kopfschmerz, Fatigue-Zunahme) sofort auf 0 Hz zurück, Intensität halbieren.', note:'10 Hz morgens (Neuroprotektion/glymph. Clearance) + 40 Hz mittags (Gamma, Neurogenese). Curcumin liposomal + Omega-3 als Basistherapie. CRP/IL-6/Ferritin alle 6–8 Wochen.'}
 };
 
 /* Sucht in der Anamnese die erste passende Erhaltungs-Empfehlung */
@@ -85,6 +114,105 @@ function maintenanceSuggestionFor(diagnoses){
     if(maintenanceProtocols[d]) return {diagnosis:d, ...maintenanceProtocols[d]};
   }
   return null;
+}
+
+/* ============================================================
+   PROTOCOLS LOADER (Referenzdatei-Override)
+   ============================================================
+   Lädt protocols.json mit folgender Präzedenz:
+     1. localStorage (manuell importierte JSON)  -> höchste Prio
+     2. ./protocols.json (Datei neben index.html)
+     3. eingebaute Defaults (oben im Code)
+   Beim erfolgreichen Laden werden `protocols` und `maintenanceProtocols`
+   überschrieben, der Quellen-Hinweis (PROTOCOLS_SOURCE) wird gesetzt
+   und die UI re-rendert.
+============================================================ */
+
+/* Builtin-Snapshot bewahren für Reset-Funktion */
+const BUILTIN_PROTOCOLS = JSON.parse(JSON.stringify(protocols));
+const BUILTIN_MAINTENANCE = JSON.parse(JSON.stringify(maintenanceProtocols));
+PROTOCOLS_SOURCE = 'Eingebaute Defaults (App-Version)';
+
+/* Validiert grob, dass ein geladenes Objekt das richtige Format hat. */
+function validateProtocolsData(data){
+  if(!data || typeof data !== 'object') return 'Datei ist kein gültiges JSON-Objekt.';
+  if(!data.protocols || typeof data.protocols !== 'object') return 'Schlüssel "protocols" fehlt oder ist kein Objekt.';
+  if(!data.maintenanceProtocols || typeof data.maintenanceProtocols !== 'object') return 'Schlüssel "maintenanceProtocols" fehlt oder ist kein Objekt.';
+  /* Mindestens ein Eintrag in beiden */
+  if(!Object.keys(data.protocols).length) return 'Keine Protokolle in der Datei gefunden.';
+  /* Stufenformat prüfen: stages muss Array mit 3 Einträgen sein, jeder ein Array */
+  for(const key of Object.keys(data.protocols)){
+    const p = data.protocols[key];
+    if(!p || !Array.isArray(p.stages) || p.stages.length !== 3){
+      return 'Protokoll "'+key+'" hat kein gültiges stages-Array (3 Einträge erwartet).';
+    }
+  }
+  return null; /* alles gut */
+}
+
+/* Wendet ein validiertes Datenobjekt auf die App an. */
+function applyProtocolsData(data, sourceLabel){
+  protocols = data.protocols;
+  maintenanceProtocols = data.maintenanceProtocols;
+  PROTOCOLS_VERSION = (data._meta && data._meta.protocolVersion) ? data._meta.protocolVersion : 'unbekannt';
+  PROTOCOLS_DATE = (data._meta && data._meta.releaseDate) ? data._meta.releaseDate : '';
+  PROTOCOLS_SOURCE = sourceLabel;
+}
+
+/* Setzt zurück auf die eingebauten Defaults und löscht ggf. die localStorage-Override. */
+function resetProtocolsToBuiltin(){
+  protocols = JSON.parse(JSON.stringify(BUILTIN_PROTOCOLS));
+  maintenanceProtocols = JSON.parse(JSON.stringify(BUILTIN_MAINTENANCE));
+  PROTOCOLS_VERSION = '1.4-builtin';
+  PROTOCOLS_DATE = '';
+  PROTOCOLS_SOURCE = 'Eingebaute Defaults (App-Version)';
+  try { localStorage.removeItem(PROTOCOLS_LS_KEY); } catch(e){}
+}
+
+/* Lädt im Hintergrund:
+   - zuerst localStorage (sofort)
+   - dann fetch von ./protocols.json (asynchron)
+   localStorage hat höhere Prio: wenn beide vorhanden, gewinnt localStorage. */
+async function loadExternalProtocols(){
+  /* 1) localStorage zuerst */
+  try {
+    const raw = localStorage.getItem(PROTOCOLS_LS_KEY);
+    if(raw){
+      const parsed = JSON.parse(raw);
+      const err = validateProtocolsData(parsed);
+      if(!err){
+        applyProtocolsData(parsed, 'Manuell importiert (localStorage)');
+        console.log('[protocols] Override aus localStorage angewendet, Version:', PROTOCOLS_VERSION);
+        return; /* localStorage gewinnt – fetch wird übersprungen */
+      } else {
+        console.warn('[protocols] Ungültige localStorage-Daten:', err);
+      }
+    }
+  } catch(e){
+    console.warn('[protocols] localStorage konnte nicht gelesen werden:', e);
+  }
+  /* 2) fetch protocols.json (nicht-blockierend, optional) */
+  try {
+    const res = await fetch('./protocols.json', { cache: 'no-cache' });
+    if(!res.ok){
+      console.log('[protocols] Keine protocols.json gefunden – verwende Defaults.');
+      return;
+    }
+    const data = await res.json();
+    const err = validateProtocolsData(data);
+    if(err){
+      console.warn('[protocols] Fehler in protocols.json:', err);
+      return;
+    }
+    applyProtocolsData(data, 'Datei protocols.json');
+    console.log('[protocols] Datei geladen, Version:', PROTOCOLS_VERSION);
+    /* Wenn die App schon gerendert wurde, neu rendern, damit die neuen Protokolle aktiv sind */
+    if(typeof render === 'function') {
+      try { render(); } catch(e){ /* render evtl. noch nicht initialisiert – egal */ }
+    }
+  } catch(e){
+    console.log('[protocols] protocols.json konnte nicht geladen werden – verwende Defaults.', e);
+  }
 }
 
 /* ============================================================
@@ -99,10 +227,38 @@ let userMode = null; // 'therapeut' | 'patient' | null (=gesperrt)
    PERSISTENCE
    ============================================================ */
 function load(){
+  /* 1) Haupt-Key versuchen */
   try{
-    const data = JSON.parse(localStorage.getItem(KEY));
-    if(data) return data;
-  }catch(e){}
+    const raw = localStorage.getItem(KEY);
+    if(raw){
+      const data = JSON.parse(raw);
+      if(data && data.patients){
+        return data;
+      }
+    }
+  }catch(e){
+    console.warn('[load] Haupt-Speicher beschädigt, versuche Snapshot:', e);
+  }
+  /* 2) Snapshot versuchen (Recovery nach Crash / korruptem Haupt-Key) */
+  try{
+    const rawSnap = localStorage.getItem(KEY_SNAPSHOT);
+    if(rawSnap){
+      const snap = JSON.parse(rawSnap);
+      if(snap && snap.patients){
+        console.warn('[load] Wiederherstellung aus Snapshot (Haupt-Speicher fehlte/korrupt)');
+        /* Snapshot sofort als neuen Haupt-Stand zurückschreiben */
+        try { localStorage.setItem(KEY, JSON.stringify(snap)); } catch(e){}
+        /* Toast erst zeigen, wenn DOM bereit ist */
+        setTimeout(() => {
+          try { showToast('🛟 Daten aus Sicherheits-Snapshot wiederhergestellt'); } catch(e){}
+        }, 1500);
+        return snap;
+      }
+    }
+  }catch(e){
+    console.warn('[load] Auch Snapshot beschädigt:', e);
+  }
+  /* 3) Fallback: leere DB */
   return {
     patients:[],
     currentId:null,
@@ -118,7 +274,29 @@ function load(){
 }
 function persist(){
   db.currentId = currentId;
-  localStorage.setItem(KEY, JSON.stringify(db));
+  let json;
+  try {
+    json = JSON.stringify(db);
+  } catch(e){
+    console.error('[persist] JSON-Serialisierung fehlgeschlagen:', e);
+    try { showToast('⚠️ Speicher-Fehler – bitte Backup exportieren'); } catch(_){}
+    return;
+  }
+  /* Snapshot-Rotation: aktueller Haupt-Stand wird VOR dem Überschreiben in
+     den Snapshot-Slot kopiert. Bei einem abgebrochenen oder fehlgeschlagenen
+     setItem(KEY,...) ist mindestens der vorletzte Stand sicher rekonstru-
+     ierbar. */
+  try {
+    const prev = localStorage.getItem(KEY);
+    if(prev) localStorage.setItem(KEY_SNAPSHOT, prev);
+  } catch(e){ /* Snapshot ist Best-Effort */ }
+  try {
+    localStorage.setItem(KEY, json);
+  } catch(e){
+    console.error('[persist] setItem fehlgeschlagen (evtl. Quota):', e);
+    try { showToast('⚠️ Speicher voll – bitte Backup exportieren & Kartei prüfen'); } catch(_){}
+    return;
+  }
   /* Auto-Backup: bei jeder Aenderung den 3-Min-Timer neu starten */
   scheduleAutoBackup();
 }
@@ -310,9 +488,18 @@ function set(path, val){
   o[keys.at(-1)] = val;
 }
 
+/* Eindeutige Patient-ID. Date.now() allein reicht nicht — wenn zwei Patienten
+   in derselben Millisekunde erstellt werden (z.B. durch versehentlichen Doppel-
+   klick oder beim Import mehrerer Patienten), bekäme der zweite dieselbe ID
+   wie der erste und würde den ersten überschreiben. Zusatz-Zufallsanteil
+   verhindert das zuverlässig. */
+function newPatientId(){
+  return 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+}
+
 function blankPatient(){
   return {
-    id:'p_'+Date.now(),
+    id:newPatientId(),
     created:new Date().toISOString(),
     /* Sitzungs-Nr. entfernt aus stamm */
     stamm:{date:today(),name:'',birth:'',gender:'',doctor:'',facility:''},
@@ -455,6 +642,12 @@ function showLock(){
   document.getElementById('footerBar').classList.add('hidden');
   /* Logo im Lock-Screen */
   document.getElementById('lockLogo').src = db.settings.logo || DEFAULT_LOGO;
+  /* Versionsanzeige im Lock-Screen */
+  const lockVer = document.getElementById('lockVersion');
+  if(lockVer){
+    lockVer.innerHTML = '<b>App v'+esc(APP_VERSION)+'</b> &nbsp;·&nbsp; Protokolle v'+esc(PROTOCOLS_VERSION);
+    lockVer.title = 'App-Version: '+APP_VERSION+' ('+APP_RELEASE_DATE+')\nProtokoll-Quelle: '+PROTOCOLS_SOURCE+(PROTOCOLS_DATE ? '\nProtokoll-Stand: '+PROTOCOLS_DATE : '');
+  }
 }
 function hideLock(){
   document.getElementById('lockOverlay').classList.add('hidden');
@@ -552,9 +745,18 @@ function render(){
     }
   }
 
-  /* Neuer-Patient-Btn in Sidebar nur sichtbar im Stammdaten-Reiter (oder Settings) */
+  /* Neuer-Patient-Btn in Sidebar IMMER sichtbar (im Therapeut-Modus).
+     Vorher war er nur auf dem Stammdaten-Reiter sichtbar – schlechte UX,
+     wenn man in einem anderen Reiter einen neuen Patienten anlegen möchte. */
   const newSb = document.getElementById('newPatientSidebarBtn');
-  if(newSb) newSb.style.display = (activeTab === 'stamm') ? '' : 'none';
+  if(newSb) newSb.style.display = '';
+
+  /* Versionsanzeige unten in der Sidebar aktualisieren */
+  const sbVer = document.getElementById('sidebarVersion');
+  if(sbVer){
+    sbVer.innerHTML = '<b>App v'+esc(APP_VERSION)+'</b> &nbsp;·&nbsp; Protokolle v'+esc(PROTOCOLS_VERSION);
+    sbVer.title = 'App-Version: '+APP_VERSION+' ('+APP_RELEASE_DATE+')\nProtokoll-Quelle: '+PROTOCOLS_SOURCE+(PROTOCOLS_DATE ? '\nProtokoll-Stand: '+PROTOCOLS_DATE : '');
+  }
 
   renderList();
   const hasPatient = !!cur();
@@ -619,9 +821,19 @@ function input(path,label,type='text'){
 function textarea(path,label,placeholder=''){
   return `<div class="field"><label>${label}</label><textarea data-path="${path}" placeholder="${esc(placeholder)}">${esc(get(path)||'')}</textarea></div>`;
 }
-function chips(path,arr){
+function chips(path,arr,opts){
   const vals = get(path) || [];
-  return `<div class="chips">${arr.map(x => `<label class="chip"><input type="checkbox" data-array="${path}" value="${esc(x)}" ${vals.includes(x)?'checked':''}>${esc(x)}</label>`).join('')}</div>`;
+  opts = opts || {};
+  /* preValues: Liste der in der Anfangs-Evaluierung angekreuzten Werte.
+     Wird nur in der End-Evaluierung gesetzt - betroffene Chips bekommen
+     ein kleines "vorher"-Label, damit der Patient sieht, was er anfangs
+     angegeben hat. */
+  const preList = Array.isArray(opts.preValues) ? opts.preValues : null;
+  return `<div class="chips">${arr.map(x => {
+    const isPre = preList && preList.includes(x);
+    const cls = 'chip' + (isPre ? ' preMark' : '');
+    return `<label class="${cls}"><input type="checkbox" data-array="${path}" value="${esc(x)}" ${vals.includes(x)?'checked':''}>${esc(x)}</label>`;
+  }).join('')}</div>`;
 }
 function scale(path,label,opts){
   const val = get(path) || '';
@@ -655,11 +867,16 @@ function sleepDurationField(path,label){
 function evalFull(prefix,title,intro){
   /* Wenn dies die End-Evaluierung ist, holen wir die Vor-Therapie-Werte als
      "preValue" fuer jede Skala. So sieht der Patient direkt, welche Punkt-
-     zahl er anfangs angegeben hat (hellgrau markiert). */
+     zahl er anfangs angegeben hat (hellgrau markiert). Bei den Chip-Listen
+     (Stimmung/Begleitbeschwerden, Vegetative Symptome) bekommen die in der
+     Anfangs-Evaluierung bereits angekreuzten Punkte ein kleines "vorher"-
+     Label, damit der Patient sieht, was er anfangs angegeben hatte. */
   const isEnd = prefix === 'ende';
   const preData = isEnd ? (cur().evaluierung || {values:{}}) : null;
   const preVal = sym => isEnd ? preData.values?.[sym] : undefined;
   const preSleepQuality = isEnd ? preData.sleepQuality : undefined;
+  const preMood = isEnd ? (preData.mood || []) : null;
+  const preVegetative = isEnd ? (preData.vegetative || []) : null;
   return `
     <h2>${title}</h2>
     <p>${intro}</p>
@@ -671,9 +888,9 @@ function evalFull(prefix,title,intro){
     </div>
     ${scale(prefix+'.sleepQuality','Schlafqualität (0 = sehr schlecht, 10 = ausgezeichnet)', {direction:'down', preValue:preSleepQuality})}
     <h3>Stimmung / Begleitbeschwerden</h3>
-    ${chips(prefix+'.mood', mood)}
+    ${chips(prefix+'.mood', mood, {preValues: preMood})}
     <h3>Vegetative Symptome</h3>
-    ${chips(prefix+'.vegetative', vegetative)}
+    ${chips(prefix+'.vegetative', vegetative, {preValues: preVegetative})}
     ${textarea(prefix+'.notes','Besonderheiten / Nebenwirkungen / Anmerkungen')}
   `;
 }
@@ -834,11 +1051,27 @@ function maintenanceBlockHtml(p){
 
   /* Empfehlung anzeigen */
   if(suggestion){
+    const totalSessions = suggestion.freq * suggestion.weeks;
+    const freqLabel = suggestion.freq >= 7
+      ? 'täglich'
+      : (suggestion.freq > 0 ? suggestion.freq+'×/Woche' : 'Keine automatische Empfehlung');
+    const weeksLabel = suggestion.weeks >= 52
+      ? 'dauerhaft empfohlen (≥ 12 Monate)'
+      : suggestion.weeks + ' Wochen';
     html += `<div class="notice ok" style="margin-top:12px">
-      <b>Empfehlung Weber Protocol Book 2025</b> für <i>${esc(suggestion.diagnosis)}</i>:
-      ${suggestion.freq > 0 ? suggestion.freq+'×/Woche für '+suggestion.weeks+' Wochen' : 'Keine automatische Empfehlung'}.
-      <br><span class="smallMuted">${esc(suggestion.note)}</span>
-      ${suggestion.freq > 0 ? '<br><button class="muted" id="applyMaintenanceSuggestion" style="margin-top:8px">Empfehlung übernehmen</button>' : ''}
+      <b>Empfehlung Stufenschema V1.4 – Stufe 3 (Erhaltung / Intensiv)</b> für <i>${esc(suggestion.diagnosis)}</i>:
+      <div class="maintenanceParams">
+        <div class="mpItem"><span class="mpLbl">Frequenz/Woche</span><span class="mpVal">${esc(freqLabel)}</span></div>
+        <div class="mpItem"><span class="mpLbl">Dauer</span><span class="mpVal">${esc(weeksLabel)}</span></div>
+        ${suggestion.hz && suggestion.hz !== '—' ? `<div class="mpItem"><span class="mpLbl">Frequenz (Hz)</span><span class="mpVal">${esc(suggestion.hz)}</span></div>` : ''}
+        ${suggestion.intensity && suggestion.intensity !== '—' ? `<div class="mpItem"><span class="mpLbl">Intensität</span><span class="mpVal">${esc(suggestion.intensity)} %</span></div>` : ''}
+        ${suggestion.duration && suggestion.duration !== '—' ? `<div class="mpItem"><span class="mpLbl">Dauer/Sitzung</span><span class="mpVal">${esc(suggestion.duration)} min</span></div>` : ''}
+        ${suggestion.timing ? `<div class="mpItem"><span class="mpLbl">Tageszeit</span><span class="mpVal">${esc(suggestion.timing)}</span></div>` : ''}
+      </div>
+      <div class="smallMuted" style="margin-top:8px"><b>Begründung:</b> ${esc(suggestion.note)}</div>
+      ${suggestion.warning ? `<div class="maintenanceWarn"><b>⚠️ Sicherheitshinweis:</b> ${esc(suggestion.warning)}</div>` : ''}
+      ${totalSessions > 100 ? `<div class="smallMuted" style="margin-top:8px;font-style:italic">Hinweis: Die Empfehlung umfasst ${totalSessions} Erhaltungs-Sitzungen (Heimanwendung). Beim Übernehmen werden die Datumsfelder automatisch verteilt – Frequenz/Dauer können vor dem Übernehmen unten angepasst werden.</div>` : ''}
+      ${suggestion.freq > 0 ? '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="muted" id="applyMaintenanceSuggestion">Empfehlung übernehmen (Frequenz/Wochen)</button><button class="muted" id="applyMaintenanceFullSuggestion">Empfehlung komplett übernehmen (inkl. Hz/%/min)</button></div>' : ''}
     </div>`;
   } else {
     html += `<div class="notice" style="margin-top:12px">Keine passende Diagnose für automatischen Vorschlag. Bitte Werte manuell eingeben.</div>`;
@@ -1933,6 +2166,23 @@ function renderPanels(){
       </div>
       ${db.settings.refPdfData || db.settings.refPdfUrl ? `<button class="muted" id="openRefPdfBtn">📄 Referenz-PDF öffnen</button>  <button class="muted" id="clearRefPdfBtn">✕ Referenz entfernen</button>` : ''}
 
+      <h3>Therapieprotokolle (automatisierte Empfehlungen)</h3>
+      <p class="smallMuted">Die App nutzt die Stufen- und Erhaltungs-Protokolle für die automatischen Therapievorschläge. Diese Werte können durch eine externe <code>protocols.json</code> aktualisiert werden – entweder als Datei neben der App (wird beim Start automatisch geladen) oder manuell importiert (überschreibt die Datei-Variante).</p>
+      <div class="protocolStatusBox">
+        <div><b>Aktive Quelle:</b> ${esc(PROTOCOLS_SOURCE)}</div>
+        <div><b>Protokoll-Version:</b> ${esc(PROTOCOLS_VERSION)}${PROTOCOLS_DATE ? ' &nbsp;·&nbsp; <b>Stand:</b> '+esc(PROTOCOLS_DATE) : ''}</div>
+        <div class="smallMuted" style="margin-top:6px">Anzahl Diagnosen: ${Object.keys(protocols).length} · Erhaltungsschemata: ${Object.keys(maintenanceProtocols).length}</div>
+      </div>
+      <div class="field" style="margin-top:10px">
+        <label>Eigene <code>protocols.json</code> importieren (überschreibt App-Defaults dauerhaft)</label>
+        <input id="protocolsJsonFile" type="file" accept="application/json,.json">
+        <small class="smallMuted">Wird im Browser gespeichert und bei jedem App-Start aktiv. Format: <code>{ _meta, protocols, maintenanceProtocols }</code>.</small>
+      </div>
+      <div class="topBtns" style="margin-top:6px">
+        <button class="muted" id="downloadCurrentProtocolsBtn">💾 Aktuelle Protokolle als JSON sichern</button>
+        ${localStorage.getItem(PROTOCOLS_LS_KEY) ? `<button class="muted" id="resetProtocolsBtn">↺ Auf App-Defaults zurücksetzen</button>` : ''}
+      </div>
+
       <h3>Praxis (erscheint im Druck-Briefkopf)</h3>
       <div class="grid">
         ${input('__settings.praxisName','Praxis-Name')}
@@ -2263,15 +2513,13 @@ function wireDynamic(){
         /* Default: Erhaltungs-Beginn = heute, falls leer */
         if(!p.maintenance.start) p.maintenance.start = today();
         adjustMaintenanceSessions();
-        /* Defaults aus letzter Akut-Sitzung uebernehmen, wenn Sitzungen noch leer */
+        /* Defaults: zuerst aus dem indikationsspezifischen Erhaltungs-Schema, dann fallback Akut-Sitzung */
         const def = maintenanceDefaultsFromAcute();
-        if(def){
-          p.maintenance.sessions.forEach(s => {
-            if(!s.hz) s.hz = def.hz;
-            if(!s.intensity) s.intensity = def.intensity;
-            if(!s.duration) s.duration = def.duration;
-          });
-        }
+        p.maintenance.sessions.forEach(s => {
+          if(!s.hz) s.hz = (sug && sug.hz && sug.hz !== '—') ? sug.hz : (def ? def.hz : '');
+          if(!s.intensity) s.intensity = (sug && sug.intensity && sug.intensity !== '—') ? sug.intensity : (def ? def.intensity : '');
+          if(!s.duration) s.duration = (sug && sug.duration && sug.duration !== '—') ? sug.duration : (def ? def.duration : '');
+        });
         generateMaintenanceDates();
       }
       persist(); render();
@@ -2287,14 +2535,33 @@ function wireDynamic(){
       p.maintenance.durationWeeks = sug.weeks;
       adjustMaintenanceSessions();
       generateMaintenanceDates();
+      /* Hz/Int/Dauer NUR setzen, wenn Sitzungen noch leer (nicht überschreiben) */
       const def = maintenanceDefaultsFromAcute();
-      if(def){
-        p.maintenance.sessions.forEach(s => {
-          if(!s.hz) s.hz = def.hz;
-          if(!s.intensity) s.intensity = def.intensity;
-          if(!s.duration) s.duration = def.duration;
-        });
-      }
+      p.maintenance.sessions.forEach(s => {
+        if(!s.hz) s.hz = (sug.hz && sug.hz !== '—') ? sug.hz : (def ? def.hz : '');
+        if(!s.intensity) s.intensity = (sug.intensity && sug.intensity !== '—') ? sug.intensity : (def ? def.intensity : '');
+        if(!s.duration) s.duration = (sug.duration && sug.duration !== '—') ? sug.duration : (def ? def.duration : '');
+      });
+      persist(); render();
+    };
+  }
+  /* "Empfehlung komplett übernehmen" – überschreibt auch bestehende Hz/Int/Dauer in allen Erhaltungs-Sitzungen */
+  const amsFull = document.getElementById('applyMaintenanceFullSuggestion');
+  if(amsFull){
+    amsFull.onclick = () => {
+      const p = cur(); if(!p) return;
+      const sug = maintenanceSuggestionFor(p.anamnese?.diagnoses || []);
+      if(!sug || sug.freq === 0){ alert('Keine Empfehlung verfügbar.'); return; }
+      if(!confirm('Bestehende Hz/Intensität/Dauer in allen Erhaltungs-Sitzungen werden mit der Stufenschema-Empfehlung überschrieben. Fortfahren?')) return;
+      p.maintenance.frequencyPerWeek = sug.freq;
+      p.maintenance.durationWeeks = sug.weeks;
+      adjustMaintenanceSessions();
+      generateMaintenanceDates();
+      p.maintenance.sessions.forEach(s => {
+        if(sug.hz && sug.hz !== '—') s.hz = sug.hz;
+        if(sug.intensity && sug.intensity !== '—') s.intensity = sug.intensity;
+        if(sug.duration && sug.duration !== '—') s.duration = sug.duration;
+      });
       persist(); render();
     };
   }
@@ -2517,6 +2784,78 @@ function wireDynamic(){
   /* Referenz-PDF Button in Therapieplanung */
   const orpp = document.getElementById('openRefPdfPlan');
   if(orpp) orpp.onclick = openRefPdf;
+
+  /* === Protokoll-JSON Import / Export / Reset === */
+  const protocolsFile = document.getElementById('protocolsJsonFile');
+  if(protocolsFile){
+    protocolsFile.onchange = e => {
+      const f = e.target.files[0];
+      if(!f) return;
+      const r = new FileReader();
+      r.onload = () => {
+        try {
+          const data = JSON.parse(r.result);
+          const err = validateProtocolsData(data);
+          if(err){ alert('Datei nicht akzeptiert:\n\n'+err+'\n\nBitte Format prüfen.'); return; }
+          /* In localStorage speichern + sofort anwenden */
+          try {
+            localStorage.setItem(PROTOCOLS_LS_KEY, JSON.stringify(data));
+          } catch(storageErr){
+            alert('Speichern fehlgeschlagen (lokaler Speicher voll?). Datei ist nicht persistent gespeichert.');
+            return;
+          }
+          applyProtocolsData(data, 'Manuell importiert: '+f.name);
+          showToast('Protokolle importiert: Version '+PROTOCOLS_VERSION);
+          render();
+        } catch(parseErr){
+          alert('Datei konnte nicht gelesen werden:\n'+parseErr.message);
+        }
+      };
+      r.readAsText(f, 'utf-8');
+    };
+  }
+
+  const dlProtocolsBtn = document.getElementById('downloadCurrentProtocolsBtn');
+  if(dlProtocolsBtn){
+    dlProtocolsBtn.onclick = () => {
+      const out = {
+        _meta: {
+          schemaVersion: '1.0',
+          protocolVersion: PROTOCOLS_VERSION,
+          releaseDate: PROTOCOLS_DATE || new Date().toISOString().slice(0,10),
+          source: PROTOCOLS_SOURCE,
+          exportedFromApp: APP_VERSION,
+          exportedAt: new Date().toISOString()
+        },
+        protocols: protocols,
+        maintenanceProtocols: maintenanceProtocols
+      };
+      const blob = new Blob([JSON.stringify(out, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'protocols-'+PROTOCOLS_VERSION+'-'+new Date().toISOString().slice(0,10)+'.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast('Aktuelle Protokolle exportiert');
+    };
+  }
+
+  const resetProtocolsBtn = document.getElementById('resetProtocolsBtn');
+  if(resetProtocolsBtn){
+    resetProtocolsBtn.onclick = () => {
+      if(!confirm('Die importierten Protokolle werden gelöscht und die App-Defaults wieder aktiviert. Fortfahren?')) return;
+      resetProtocolsToBuiltin();
+      /* Falls eine protocols.json vorhanden ist, würde die beim nächsten Reload wieder gewinnen.
+         Direkt jetzt neu laden, damit der Nutzer den aktuellen Stand sieht. */
+      loadExternalProtocols().then(() => {
+        showToast('Auf App-Defaults zurückgesetzt');
+        render();
+      });
+    };
+  }
 }
 
 /* ========================================================
@@ -2592,7 +2931,7 @@ function importSinglePatient(np){
       persist(); render();
       alert(`Patient "${name}" wurde überschrieben. Die übrige Kartei (${db.patients.length} Patienten) bleibt unverändert.`);
     } else if(choice === '2'){
-      np.id = 'p_'+Date.now();
+      np.id = newPatientId();
       np.stamm = np.stamm || {};
       np.stamm.name = (np.stamm.name || 'Unbenannt') + ' (Import)';
       db.patients.push(np);
@@ -3203,7 +3542,39 @@ document.getElementById('nextBtn').onclick = () => {
   scrollTo({top:0, behavior:'smooth'});
 };
 document.getElementById('search').oninput = renderList;
-window.addEventListener('beforeunload', saveForm);
+
+/* ============================================================
+   ROBUSTE SPEICHERUNG: mehrere Save-Trigger
+   ============================================================
+   `beforeunload` allein ist auf Mobile (insbesondere iOS-Safari, Android-
+   Chrome) NICHT zuverlässig - es feuert oft nicht, wenn der User die App
+   wegswipet, das Tab wechselt oder das Display ausgeht. Daher zusätzlich:
+   - `pagehide`     : feuert auch auf iOS, wenn die Seite in den BFCache geht
+   - `visibilitychange` -> hidden: feuert beim Tab-Wechsel & App-Minimieren
+   - periodischer Auto-Save alle 20s, falls der User auf einem Formular tippt
+*/
+function safeSave(reason){
+  try {
+    /* Aktives Eingabefeld zwingen, seinen Wert zu committen */
+    if(document.activeElement && typeof document.activeElement.blur === 'function'){
+      document.activeElement.blur();
+    }
+    saveForm();
+  } catch(e){
+    console.warn('[safeSave/'+(reason||'?')+'] Fehler:', e);
+  }
+}
+window.addEventListener('beforeunload', () => safeSave('beforeunload'));
+window.addEventListener('pagehide',     () => safeSave('pagehide'));
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'hidden') safeSave('visibilitychange');
+});
+/* Periodischer Save als Sicherheitsnetz (alle 20s, nur wenn entsperrt) */
+setInterval(() => {
+  if(userMode === null) return;        /* gesperrt -> nichts zu speichern */
+  if(!document.querySelector('[data-path],[data-array]')) return; /* kein Formular sichtbar */
+  safeSave('interval');
+}, 20000);
 
 /* Strg+S = Speichern */
 document.addEventListener('keydown', e => {
@@ -3275,7 +3646,11 @@ if('serviceWorker' in navigator){
   };
 })();
 
-/* === START: erst Lock anzeigen === */
+/* === START: Protokolle laden, dann Lock anzeigen === */
+/* Loader läuft asynchron im Hintergrund. Falls schnell genug fertig,
+   sind die externen Protokolle direkt aktiv. Falls noch unterwegs,
+   ruft der Loader render() nach Abschluss neu auf. */
+loadExternalProtocols();
 applyGlobalSettings();
 showLock();
 
