@@ -5,8 +5,8 @@
 'use strict';
 
 const KEY = 'weberbrain_clean_v4';
-const APP_VERSION = '1.22';
-const APP_RELEASE_DATE = '2026-05-19';
+const APP_VERSION = '1.21';
+const APP_RELEASE_DATE = '2026-05-15';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
 const TABS_ALL = [
@@ -55,35 +55,28 @@ const protocols = {
   'Neuroinflammation':{name:'Neuroinflammation',stages:[['1–3','0','25','10–15','CW-Modus: Entzündungsreduktion, NF-κB-Hemmung; sehr behutsam starten'],['4–10','10','50','20','Alpha 10 Hz: glymphatische Clearance, Mikroglia-Modulation, autonome Balance'],['11+','10 + 40','50–75','25–30','10 Hz morgens (Regulation) + 40 Hz mittags (Gamma, Neuroprotektion); nie 40 Hz abends']]}
 };
 
-/* === ERHALTUNGS-PROTOKOLLE (Stufenschema V1.4 / Weber Protocol Book 2025) ===
-   Pro Diagnose indikationsspezifische Erhaltungs-Empfehlung mit:
-     freq        = Sitzungen pro Woche (0 = keine automatische Empfehlung)
-     weeks       = Dauer in Wochen (52 = dauerhaft empfohlen)
-     hz          = Frequenz-Empfehlung für Erhaltung (Text, kann Wechsel enthalten)
-     intensity   = Intensität in % (Text, kann Spanne enthalten)
-     duration    = Sitzungsdauer in Minuten (Text, kann Spanne enthalten)
-     timing      = Tageszeit-Hinweis ('' = flexibel)
-     warning     = Sicherheitshinweis / Kontraindikation (leer wenn keine)
-     note        = Begründung der Empfehlung
-   Quelle: WeberBrain Stufenschema V1.4 (Stufe 3 = Erhaltung / Intensiv)
-*/
+/* === ERHALTUNGS-PROTOKOLLE (Weber Protocol Book 2025) ===
+   Pro Diagnose: Empfehlung für Frequenz pro Woche und Gesamtdauer.
+   Bei dauerhaften Erhaltungstherapien (Demenz, Parkinson) werden 52 Wochen
+   als Default genommen, kann beliebig erhoeht/erneuert werden.
+   note erscheint im UI als Begruendungstext fuer die Empfehlung. */
 const maintenanceProtocols = {
-  'Alzheimer / Demenz':         {freq:7, weeks:52, hz:'40', intensity:'75–100', duration:'30', timing:'täglich (Heimanwendung)', warning:'Absetzen führt zu Rückfall – Dauertherapie empfohlen.', note:'Neurodegenerativ – tägliche Heimanwendung entscheidend. 40 Hz Gamma-Entrainment für glymphatische Amyloid-Clearance.'},
-  'Parkinson':                  {freq:7, weeks:52, hz:'40 (morgens) + 10 (abends)', intensity:'75–100', duration:'30', timing:'täglich – Wechsel je Tageszeit', warning:'', note:'Neurodegenerativ – dauerhafte Stimulation. Morgens 40 Hz (Motorik/Kognition), abends 10 Hz (Schlaf/Angst).'},
-  'Schlaganfall':               {freq:6, weeks:36, hz:'40', intensity:'75', duration:'25–30', timing:'5–7×/Woche', warning:'', note:'Chronische Phase: Neuroplastizität, Verbesserung funktioneller Konnektivität. Bei chronischen Defiziten ggf. dauerhaft fortsetzen.'},
-  'Depression':                 {freq:7, weeks:16, hz:'0 → 10 (sequenziell)', intensity:'75', duration:'30', timing:'täglich, morgens', warning:'NIEMALS 40 Hz bei reiner Depression – kann Anspannung und Grübeln verstärken. NIEMALS abends – 10 Hz abends kann Einschlafstörungen verursachen.', note:'Optimales Erhaltungsprotokoll: 15 min 0 Hz (Aufwärmung) + 15 min 10 Hz (Alpha frontal). Nach 3–6 Monaten individuell auf alle 2 Wochen reduzieren.'},
-  'Angststörung':               {freq:7, weeks:16, hz:'10', intensity:'50–75', duration:'25–30', timing:'täglich, morgens', warning:'Hyperarousal möglich – nicht zu schnell steigern.', note:'Dauerprotokoll Alpha 10 Hz; nach Stabilisierung individuell ausschleichen. Morgens bevorzugen (Cortisol-Rhythmus).'},
-  'PTBS':                       {freq:7, weeks:16, hz:'10', intensity:'50–75', duration:'25–30', timing:'täglich, morgens', warning:'Reaktivierung möglich – Sitzungszeit nur schrittweise steigern. Immer in Kombination mit Traumatherapie (EMDR, TF-KVT).', note:'PTBS-Erhaltung: Alpha 10 Hz langfristig in Abstimmung mit Traumatherapie.'},
-  'Long COVID':                 {freq:7, weeks:16, hz:'10 (morgens) + 40 (mittags)', intensity:'50–75', duration:'30', timing:'täglich – nie 40 Hz abends', warning:'PEM (Post-Exertional Malaise) beachten: keine Überstimulation. Bei Verschlechterung sofort auf 0 Hz zurück und Intensität halbieren.', note:'10 Hz morgens (Regulation), 40 Hz mittags (Kognition). Neuroinflammatorische Komponente – HRV-Monitoring empfohlen.'},
-  'Burnout':                    {freq:7, weeks:16, hz:'10 (morgens) + 40 (mittags)', intensity:'50–75', duration:'30', timing:'täglich – nie 40 Hz abends', warning:'Aktivierung nur morgens/mittags – abends 40 Hz verschlechtert Schlaf.', note:'10 Hz morgens (autonome Regulation), 40 Hz mittags (Kognition). Nach 3–6 Monaten nach Bedarf.'},
-  'SHT (Schädel-Hirn-Trauma)':  {freq:7, weeks:24, hz:'40', intensity:'75', duration:'25–30', timing:'täglich (Heimanwendung)', warning:'Rückfall nach Therapieende dokumentiert → Heimtherapie empfehlen. Bei Post-Concussion niedriger starten.', note:'Chronisches TBI: Default-Mode-Network gezielt stimulieren. Kognitive Testbatterie alle 4 Wochen.'},
-  'Schlafstörung':              {freq:7, weeks:12, hz:'10 → 0 (sequenziell)', intensity:'50', duration:'25–30', timing:'täglich abends (1–2 h vor Schlaf)', warning:'NIEMALS 40 Hz abends – aktivierend, verschlechtert Schlaf.', note:'15 min 10 Hz, dann 15 min CW als Übergang in Schlafvorbereitung. Im Liegen, abgedunkelt.'},
-  'Migräne / Kopfschmerz':      {freq:7, weeks:24, hz:'0 (CW, kein Puls)', intensity:'50', duration:'20–25', timing:'täglich (Prophylaxe), tageszeit-flexibel', warning:'NIEMALS 10 Hz oder 40 Hz – gepulstes Licht kann kortikale Spreading Depression auslösen und Attacken triggern. Nicht während aktiver Attacke. < 48 h nach Attacke: max. 25 %, max. 15 min.', note:'Langzeitprophylaxe: Reduktion Attackenfrequenz und -intensität. Triggertagebuch parallel führen.'},
-  'ADHS':                       {freq:7, weeks:24, hz:'40 (morgens) + 10 (abends)', intensity:'50–75', duration:'25–30', timing:'täglich – Wechsel je Tageszeit', warning:'Kinder: max. 50 % Intensität unter 12 Jahren.', note:'Morgens 40 Hz (Fokus, Exekutivfunktionen), abends 10 Hz (Entspannung/Schlaf). Begleitend Neurofeedback sinnvoll.'},
-  'Multiple Sklerose':          {freq:5, weeks:52, hz:'10 / 40 (individuell)', intensity:'50', duration:'20–25', timing:'5×/Woche', warning:'Fatigue beobachten – bei Verschlechterung Intensität reduzieren.', note:'Symptomdominanz-abhängig: 10 Hz bei autonomer Dysregulation, 40 Hz bei kognitiven Defiziten. Dauerhaft.'},
-  'Tinnitus':                   {freq:5, weeks:16, hz:'10', intensity:'50', duration:'20–25', timing:'5×/Woche', warning:'Verträglichkeit maßgeblich – bei Tinnitus-Zunahme sofort pausieren.', note:'1×/Woche solange Verträglichkeit gut bleibt. Reizarme Anwendung.'},
-  'Epilepsie':                  {freq:0, weeks:0,  hz:'—', intensity:'—', duration:'—', timing:'—', warning:'NUR nach ärztlicher Rücksprache und individueller Verordnung. Photosensitivität strikt beachten.', note:'Keine automatische Empfehlung – ärztliche Verordnung erforderlich.'},
-  'Neuroinflammation':          {freq:7, weeks:52, hz:'10 (morgens) + 40 (mittags)', intensity:'50–75', duration:'25–30', timing:'täglich – nie 40 Hz abends', warning:'Bei Verschlechterung (Kopfschmerz, Fatigue-Zunahme) sofort auf 0 Hz zurück, Intensität halbieren.', note:'10 Hz morgens (Neuroprotektion/glymph. Clearance) + 40 Hz mittags (Gamma, Neurogenese). Curcumin liposomal + Omega-3 als Basistherapie. CRP/IL-6/Ferritin alle 6–8 Wochen.'}
+  'Alzheimer / Demenz':         {freq:2, weeks:52, note:'Neurodegenerativ – glymphatische Clearance braucht kontinuierliche Stimulation. Dauerhaft 1–2×/Woche, kein Absetzen empfohlen.'},
+  'Parkinson':                  {freq:2, weeks:52, note:'Neurodegenerativ – dauerhaft 1–2×/Woche, kein Absetzen empfohlen.'},
+  'Schlaganfall':               {freq:2, weeks:36, note:'Nach Akutphase 1–2×/Woche für 6–12 Monate. Bei chronischen Defiziten ggf. dauerhaft fortsetzen.'},
+  'Depression':                 {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, danach individuell auf alle 2 Wochen reduzieren.'},
+  'Angststörung':               {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, dann individuell ausschleichen.'},
+  'PTBS':                       {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, in Abstimmung mit Traumatherapie.'},
+  'Long COVID':                 {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate. PEM weiter beobachten.'},
+  'Burnout':                    {freq:1, weeks:16, note:'1×/Woche für 3–6 Monate, dann nach Bedarf.'},
+  'SHT (Schädel-Hirn-Trauma)':  {freq:1, weeks:24, note:'1×/Woche für 6 Monate. Bei chronischem TBI längere Erhaltung.'},
+  'Schlafstörung':              {freq:1, weeks:12, note:'Bei Bedarf 1×/Woche, abendlich vor dem Schlafengehen.'},
+  'Migräne / Kopfschmerz':      {freq:1, weeks:24, note:'1×/Woche prophylaktisch. Nicht während akuter Attacke.'},
+  'ADHS':                       {freq:1, weeks:24, note:'1×/Woche Erhaltung, idealerweise vormittags.'},
+  'Multiple Sklerose':          {freq:2, weeks:52, note:'Symptomdominanz-abhängig 1–2×/Woche, dauerhaft.'},
+  'Tinnitus':                   {freq:1, weeks:16, note:'1×/Woche solange Verträglichkeit gut bleibt.'},
+  'Epilepsie':                  {freq:0, weeks:0,  note:'Keine automatische Empfehlung – ärztliche Verordnung erforderlich.'},
+  'Neuroinflammation':           {freq:2, weeks:24, note:'Neuroinflammation erfordert kontinuierliche Stimulation. 2×/Woche für 6 Monate, danach individuell nach Symptomkontrolle.'}
 };
 
 /* Sucht in der Anamnese die erste passende Erhaltungs-Empfehlung */
@@ -841,27 +834,11 @@ function maintenanceBlockHtml(p){
 
   /* Empfehlung anzeigen */
   if(suggestion){
-    const totalSessions = suggestion.freq * suggestion.weeks;
-    const freqLabel = suggestion.freq >= 7
-      ? 'täglich'
-      : (suggestion.freq > 0 ? suggestion.freq+'×/Woche' : 'Keine automatische Empfehlung');
-    const weeksLabel = suggestion.weeks >= 52
-      ? 'dauerhaft empfohlen (≥ 12 Monate)'
-      : suggestion.weeks + ' Wochen';
     html += `<div class="notice ok" style="margin-top:12px">
-      <b>Empfehlung Stufenschema V1.4 – Stufe 3 (Erhaltung / Intensiv)</b> für <i>${esc(suggestion.diagnosis)}</i>:
-      <div class="maintenanceParams">
-        <div class="mpItem"><span class="mpLbl">Frequenz/Woche</span><span class="mpVal">${esc(freqLabel)}</span></div>
-        <div class="mpItem"><span class="mpLbl">Dauer</span><span class="mpVal">${esc(weeksLabel)}</span></div>
-        ${suggestion.hz && suggestion.hz !== '—' ? `<div class="mpItem"><span class="mpLbl">Frequenz (Hz)</span><span class="mpVal">${esc(suggestion.hz)}</span></div>` : ''}
-        ${suggestion.intensity && suggestion.intensity !== '—' ? `<div class="mpItem"><span class="mpLbl">Intensität</span><span class="mpVal">${esc(suggestion.intensity)} %</span></div>` : ''}
-        ${suggestion.duration && suggestion.duration !== '—' ? `<div class="mpItem"><span class="mpLbl">Dauer/Sitzung</span><span class="mpVal">${esc(suggestion.duration)} min</span></div>` : ''}
-        ${suggestion.timing ? `<div class="mpItem"><span class="mpLbl">Tageszeit</span><span class="mpVal">${esc(suggestion.timing)}</span></div>` : ''}
-      </div>
-      <div class="smallMuted" style="margin-top:8px"><b>Begründung:</b> ${esc(suggestion.note)}</div>
-      ${suggestion.warning ? `<div class="maintenanceWarn"><b>⚠️ Sicherheitshinweis:</b> ${esc(suggestion.warning)}</div>` : ''}
-      ${totalSessions > 100 ? `<div class="smallMuted" style="margin-top:8px;font-style:italic">Hinweis: Die Empfehlung umfasst ${totalSessions} Erhaltungs-Sitzungen (Heimanwendung). Beim Übernehmen werden die Datumsfelder automatisch verteilt – Frequenz/Dauer können vor dem Übernehmen unten angepasst werden.</div>` : ''}
-      ${suggestion.freq > 0 ? '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="muted" id="applyMaintenanceSuggestion">Empfehlung übernehmen (Frequenz/Wochen)</button><button class="muted" id="applyMaintenanceFullSuggestion">Empfehlung komplett übernehmen (inkl. Hz/%/min)</button></div>' : ''}
+      <b>Empfehlung Weber Protocol Book 2025</b> für <i>${esc(suggestion.diagnosis)}</i>:
+      ${suggestion.freq > 0 ? suggestion.freq+'×/Woche für '+suggestion.weeks+' Wochen' : 'Keine automatische Empfehlung'}.
+      <br><span class="smallMuted">${esc(suggestion.note)}</span>
+      ${suggestion.freq > 0 ? '<br><button class="muted" id="applyMaintenanceSuggestion" style="margin-top:8px">Empfehlung übernehmen</button>' : ''}
     </div>`;
   } else {
     html += `<div class="notice" style="margin-top:12px">Keine passende Diagnose für automatischen Vorschlag. Bitte Werte manuell eingeben.</div>`;
@@ -2286,13 +2263,15 @@ function wireDynamic(){
         /* Default: Erhaltungs-Beginn = heute, falls leer */
         if(!p.maintenance.start) p.maintenance.start = today();
         adjustMaintenanceSessions();
-        /* Defaults: zuerst aus dem indikationsspezifischen Erhaltungs-Schema, dann fallback Akut-Sitzung */
+        /* Defaults aus letzter Akut-Sitzung uebernehmen, wenn Sitzungen noch leer */
         const def = maintenanceDefaultsFromAcute();
-        p.maintenance.sessions.forEach(s => {
-          if(!s.hz) s.hz = (sug && sug.hz && sug.hz !== '—') ? sug.hz : (def ? def.hz : '');
-          if(!s.intensity) s.intensity = (sug && sug.intensity && sug.intensity !== '—') ? sug.intensity : (def ? def.intensity : '');
-          if(!s.duration) s.duration = (sug && sug.duration && sug.duration !== '—') ? sug.duration : (def ? def.duration : '');
-        });
+        if(def){
+          p.maintenance.sessions.forEach(s => {
+            if(!s.hz) s.hz = def.hz;
+            if(!s.intensity) s.intensity = def.intensity;
+            if(!s.duration) s.duration = def.duration;
+          });
+        }
         generateMaintenanceDates();
       }
       persist(); render();
@@ -2308,33 +2287,14 @@ function wireDynamic(){
       p.maintenance.durationWeeks = sug.weeks;
       adjustMaintenanceSessions();
       generateMaintenanceDates();
-      /* Hz/Int/Dauer NUR setzen, wenn Sitzungen noch leer (nicht überschreiben) */
       const def = maintenanceDefaultsFromAcute();
-      p.maintenance.sessions.forEach(s => {
-        if(!s.hz) s.hz = (sug.hz && sug.hz !== '—') ? sug.hz : (def ? def.hz : '');
-        if(!s.intensity) s.intensity = (sug.intensity && sug.intensity !== '—') ? sug.intensity : (def ? def.intensity : '');
-        if(!s.duration) s.duration = (sug.duration && sug.duration !== '—') ? sug.duration : (def ? def.duration : '');
-      });
-      persist(); render();
-    };
-  }
-  /* "Empfehlung komplett übernehmen" – überschreibt auch bestehende Hz/Int/Dauer in allen Erhaltungs-Sitzungen */
-  const amsFull = document.getElementById('applyMaintenanceFullSuggestion');
-  if(amsFull){
-    amsFull.onclick = () => {
-      const p = cur(); if(!p) return;
-      const sug = maintenanceSuggestionFor(p.anamnese?.diagnoses || []);
-      if(!sug || sug.freq === 0){ alert('Keine Empfehlung verfügbar.'); return; }
-      if(!confirm('Bestehende Hz/Intensität/Dauer in allen Erhaltungs-Sitzungen werden mit der Stufenschema-Empfehlung überschrieben. Fortfahren?')) return;
-      p.maintenance.frequencyPerWeek = sug.freq;
-      p.maintenance.durationWeeks = sug.weeks;
-      adjustMaintenanceSessions();
-      generateMaintenanceDates();
-      p.maintenance.sessions.forEach(s => {
-        if(sug.hz && sug.hz !== '—') s.hz = sug.hz;
-        if(sug.intensity && sug.intensity !== '—') s.intensity = sug.intensity;
-        if(sug.duration && sug.duration !== '—') s.duration = sug.duration;
-      });
+      if(def){
+        p.maintenance.sessions.forEach(s => {
+          if(!s.hz) s.hz = def.hz;
+          if(!s.intensity) s.intensity = def.intensity;
+          if(!s.duration) s.duration = def.duration;
+        });
+      }
       persist(); render();
     };
   }
