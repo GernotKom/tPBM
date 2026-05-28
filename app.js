@@ -12,7 +12,7 @@ const KEY = 'weberbrain_clean_v4';
    Persist-Vorgang VOR dem aktuellen Stand geschrieben (also der vor-
    letzte gute Stand). */
 const KEY_SNAPSHOT = 'weberbrain_clean_v4_snapshot';
-const APP_VERSION = '1.25';
+const APP_VERSION = '1.26';
 const APP_RELEASE_DATE = '2026-05-28';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
@@ -626,6 +626,66 @@ async function doAutoBackup(){
     showToast('💾 Auto-Backup erstellt');
   } catch(e){
     console.error('Auto-Backup fehlgeschlagen:', e);
+  }
+}
+
+/* ===== USB-/Ordner-Export in Monats-Unterordner =====
+   Schreibt eine Kartei-Sicherung auf einen frei gewählten Datenträger
+   (z.B. angesteckter USB-Stick) und legt dort automatisch einen Unterordner
+   im Format "JJJJ-MM" (Jahr-Monat) an. So bleibt die Sicherung pro Monat
+   sauber getrennt. Bei jedem Aufruf wird der Ziel-Datenträger neu gewählt
+   (Sicherheits-Vorgabe der File System Access API für USB-Sticks, die
+   ohnehin nicht dauerhaft angesteckt sind).
+   Auf Tablet/Mobile (kein showDirectoryPicker) -> Hinweis + Download-Fallback. */
+function backupMonthFolder(){
+  const d = new Date();
+  const p = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1); /* z.B. 2026-05 */
+}
+
+async function exportToUsb(){
+  saveForm();
+  const json = JSON.stringify(db, null, 2);
+  const monthDir = backupMonthFolder();
+  const filename = 'weberbrain_kartei_' + backupTimestamp() + '.json';
+
+  /* Kein Ordner-Picker (Tablet/Mobile/iOS): Download-Fallback */
+  if(!isFolderPickerSupported()){
+    const blob = new Blob([json], {type:'application/json'});
+    dl(blob, 'weberbrain_kartei_' + monthDir + '_' + backupTimestamp() + '.json');
+    showToast('💾 Auf diesem Gerät ist keine USB-Ordnerwahl möglich – Datei wurde in „Downloads" gespeichert.');
+    return;
+  }
+
+  try {
+    /* 1) Datenträger / Ziel-Ordner wählen (z.B. USB-Stick-Wurzel) */
+    const root = await window.showDirectoryPicker({mode:'readwrite'});
+
+    /* 2) Schreibrechte sicherstellen */
+    let perm = await root.queryPermission({mode:'readwrite'});
+    if(perm !== 'granted') perm = await root.requestPermission({mode:'readwrite'});
+    if(perm !== 'granted'){
+      showToast('⚠️ Keine Schreibrechte für den gewählten Datenträger.');
+      return;
+    }
+
+    /* 3) Monats-Unterordner anlegen (oder öffnen, falls schon vorhanden) */
+    const monthHandle = await root.getDirectoryHandle(monthDir, {create:true});
+
+    /* 4) Datei schreiben */
+    const fileHandle = await monthHandle.getFileHandle(filename, {create:true});
+    const writable = await fileHandle.createWritable();
+    await writable.write(json);
+    await writable.close();
+
+    showToast('💾 Sicherung auf „' + (root.name || 'Datenträger') + '" → ' + monthDir + '/' + filename);
+  } catch(e){
+    if(e?.name === 'AbortError'){
+      /* Nutzer hat den Datenträger-Dialog abgebrochen – kein Fehler */
+      return;
+    }
+    console.error('[exportToUsb] fehlgeschlagen:', e);
+    showToast('⚠️ USB-Sicherung fehlgeschlagen – ist der Stick angesteckt und beschreibbar?');
   }
 }
 
@@ -2649,8 +2709,13 @@ function renderPanels(){
       <div class="topBtns">
         <button class="muted" id="importBtn">📥 JSON importieren (Patient oder Kartei)</button>
         <button class="muted" id="exportBtn2">💾 Kartei-Sicherung jetzt erstellen</button>
+        <button class="muted" id="usbExportBtn">🔌 Sicherung auf USB-Stick…</button>
       </div>
       <input id="importFile" type="file" accept="application/json" class="hidden">
+      <p class="smallMuted" style="margin-top:6px">
+        <b>🔌 USB-Sicherung:</b> Stick anstecken, Button drücken und den Stick als Ziel wählen.
+        Die Datei wird automatisch in einem Monats-Unterordner (<code>${backupMonthFolder()}/</code>) abgelegt.
+      </p>
 
       <h3>Auto-Backup</h3>
       <label class="toggleSwitch" style="margin:8px 0">
@@ -3099,6 +3164,9 @@ function wireDynamic(){
 
   const eb2 = document.getElementById('exportBtn2');
   if(eb2) eb2.onclick = exportJson;
+
+  const usbBtn = document.getElementById('usbExportBtn');
+  if(usbBtn) usbBtn.onclick = exportToUsb;
 
   /* Auto-Backup Toggle */
   const abt = document.getElementById('autoBackupToggle');
