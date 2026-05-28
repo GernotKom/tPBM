@@ -12,8 +12,8 @@ const KEY = 'weberbrain_clean_v4';
    Persist-Vorgang VOR dem aktuellen Stand geschrieben (also der vor-
    letzte gute Stand). */
 const KEY_SNAPSHOT = 'weberbrain_clean_v4_snapshot';
-const APP_VERSION = '1.24';
-const APP_RELEASE_DATE = '2026-05-19';
+const APP_VERSION = '1.25';
+const APP_RELEASE_DATE = '2026-05-28';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
 const TABS_ALL = [
@@ -549,9 +549,46 @@ function scheduleAutoBackup(){
   }, intervalMs);
 }
 
+/* Anzahl der maximal aufzubewahrenden Backup-Speichersätze im gewählten Ordner. */
+const MAX_BACKUPS = 10;
+
+/* Zeitstempel für Backup-Dateinamen: YYYY-MM-DD_HH-MM-SS.
+   Dadurch erzeugt jeder Speichervorgang einen eigenen Speichersatz, der sich
+   sauber sortieren und auf die letzten MAX_BACKUPS begrenzen lässt. */
+function backupTimestamp(){
+  const d = new Date();
+  const p = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())
+    +'_'+p(d.getHours())+'-'+p(d.getMinutes())+'-'+p(d.getSeconds());
+}
+
+/* Hält im Backup-Ordner nur die letzten MAX_BACKUPS Speichersätze.
+   Erkennt Backup-Dateien am Präfix 'weberbrain_backup_' und sortiert sie
+   alphabetisch (= chronologisch dank Zeitstempel im Namen); ältere werden
+   gelöscht. Best-Effort: schlägt das Löschen fehl, wird es ignoriert. */
+async function pruneBackups(handle){
+  if(!handle || typeof handle.entries !== 'function') return;
+  try {
+    const names = [];
+    for await (const [name, entry] of handle.entries()){
+      if(entry.kind === 'file' && /^weberbrain_backup_.*\.json$/i.test(name)){
+        names.push(name);
+      }
+    }
+    if(names.length <= MAX_BACKUPS) return;
+    names.sort(); /* alt -> neu */
+    const toDelete = names.slice(0, names.length - MAX_BACKUPS);
+    for(const name of toDelete){
+      try { await handle.removeEntry(name); } catch(_){ /* einzelnes Löschen best-effort */ }
+    }
+  } catch(e){
+    console.warn('[pruneBackups] Bereinigung fehlgeschlagen:', e);
+  }
+}
+
 async function doAutoBackup(){
   try {
-    const filename = 'weberbrain_backup_' + today() + '.json';
+    const filename = 'weberbrain_backup_' + backupTimestamp() + '.json';
     const json = JSON.stringify(db, null, 2);
     /* Wenn ein Ordner-Handle (File System Access API) gewaehlt wurde,
        direkt dorthin schreiben - sonst Download-Fallback */
@@ -568,16 +605,20 @@ async function doAutoBackup(){
           const writable = await fileHandle.createWritable();
           await writable.write(json);
           await writable.close();
+          /* Nach erfolgreichem Schreiben: alte Speichersätze aufräumen
+             (immer nur die letzten MAX_BACKUPS behalten) */
+          await pruneBackups(handle);
           _lastBackupHash = dataHash();
           _hasUnsavedChanges = false;
-          showToast('💾 Backup in gewählten Ordner gespeichert');
+          showToast('💾 Backup gespeichert (max. '+MAX_BACKUPS+' Sätze)');
           return;
         }
       } catch(e){
         console.warn('Auto-Backup in Ordner fehlgeschlagen, Fallback auf Download:', e);
       }
     }
-    /* Standard-Fallback: Download */
+    /* Standard-Fallback: Download (Browser-Downloads können nicht bereinigt
+       werden – dort entscheidet der Nutzer/Dateisystem über die Aufbewahrung) */
     const blob = new Blob([json], {type:'application/json'});
     dl(blob, filename);
     _lastBackupHash = dataHash();
@@ -722,7 +763,7 @@ function blankPatient(){
   };
 }
 function makeSessions(n){
-  return Array.from({length:Number(n)||0}, (_,i) => ({nr:i+1,date:'',hz:'',intensity:'',duration:'',note:'',done:false}));
+  return Array.from({length:Number(n)||0}, (_,i) => ({nr:i+1,date:'',hz:'',intensity:'',duration:'',note:'',done:false,rating:''}));
 }
 function ensureShape(){
   const p = cur();
@@ -756,9 +797,9 @@ function adjustSessions(){
   const p = cur();
   if(!p) return;
   const n = Math.max(0, Math.min(40, Number(p.planung.total)||0));
-  while(p.planung.sessions.length < n) p.planung.sessions.push({nr:p.planung.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:'',done:false});
+  while(p.planung.sessions.length < n) p.planung.sessions.push({nr:p.planung.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:'',done:false,rating:''});
   if(p.planung.sessions.length > n) p.planung.sessions = p.planung.sessions.slice(0,n);
-  p.planung.sessions.forEach((s,i) => { s.nr = i+1; if(s.done === undefined) s.done = false; });
+  p.planung.sessions.forEach((s,i) => { s.nr = i+1; if(s.done === undefined) s.done = false; if(s.rating === undefined) s.rating = ''; });
 }
 
 /* === ERHALTUNGS-SITZUNGEN ===
@@ -775,9 +816,9 @@ function adjustMaintenanceSessions(){
   if(!p || !p.maintenance) return;
   const m = p.maintenance;
   const n = maintenanceTargetCount(m);
-  while(m.sessions.length < n) m.sessions.push({nr:m.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:'',done:false});
+  while(m.sessions.length < n) m.sessions.push({nr:m.sessions.length+1,date:'',hz:'',intensity:'',duration:'',note:'',done:false,rating:''});
   if(m.sessions.length > n) m.sessions = m.sessions.slice(0,n);
-  m.sessions.forEach((s,i) => { s.nr = i+1; if(s.done === undefined) s.done = false; });
+  m.sessions.forEach((s,i) => { s.nr = i+1; if(s.done === undefined) s.done = false; if(s.rating === undefined) s.rating = ''; });
 }
 
 /* Verteilt Sitzungs-Daten gleichmaessig in den Wochen ab Startdatum.
@@ -1170,6 +1211,29 @@ function experienceHint(diagName){
     ? 'Basierend auf eigenen Patientendaten mit positivem Verlauf &mdash; zur Orientierung, kein Ersatz für das Referenzprotokoll.'
     : `Empfehlungen werden erst angezeigt, sobald mindestens ${MIN_POS_N} abgeschlossene Therapien mit positivem Verlauf (Verbesserung > 0&nbsp;%) vorliegen.`;
 
+  /* === Zusatz-Block: Optimum aus den Sitzungs-Erfolgs-Bewertungen (1–5) ===
+     Unabhängig von der End-Evaluierung: nutzt jede einzelne bewertete Sitzung
+     dieser Diagnose und zeigt, bei welcher Frequenz/Intensität/Dauer die
+     Sitzungserfolge am höchsten bewertet wurden. */
+  const ratingRows = buildSessionRatingDataset().filter(r => r.diagnoses.includes(diagName));
+  let ratingBlock = '';
+  if(ratingRows.length >= 1){
+    const fmt = b => b ? `${b.label} <span class="expHintN">(Ø ${b.meanRating.toFixed(1)} · n=${b.n})</span>` : 'Noch keine Werte';
+    const bestHz  = bestBinByRating(ratingRows, 'hz',  HZ_BINS);
+    const bestInt = bestBinByRating(ratingRows, 'intensity', INT_BINS);
+    const bestDur = bestBinByRating(ratingRows, 'duration',  DUR_BINS);
+    const meanAll = ratingRows.reduce((a,b)=>a+b.rating,0) / ratingRows.length;
+    ratingBlock = `<div class="expHintRatingHead">
+        ⭐ Beste Werte nach <b>Sitzungs-Erfolgsbewertung</b>
+        <span class="expHintImp" style="color:#0d6b3c">Ø ${meanAll.toFixed(1)} / 5 · ${ratingRows.length} Sitzung${ratingRows.length!==1?'en':''}</span>
+      </div>
+      <div class="expHintGrid">
+        <div class="expHintItem"><div class="expHintLbl">Beste Frequenz</div><div class="expHintVal">${fmt(bestHz)}</div></div>
+        <div class="expHintItem"><div class="expHintLbl">Beste Intensität</div><div class="expHintVal">${fmt(bestInt)}</div></div>
+        <div class="expHintItem"><div class="expHintLbl">Beste Dauer</div><div class="expHintVal">${fmt(bestDur)}</div></div>
+      </div>`;
+  }
+
   return `<div class="expHint">
     <div class="expHintHead">
       <span class="expHintIcon">📊</span>
@@ -1182,6 +1246,7 @@ function experienceHint(diagName){
       <div class="expHintItem"><div class="expHintLbl">Ø Dauer</div><div class="expHintVal">${avgLabel('avgDuration')}</div></div>
       <div class="expHintItem"><div class="expHintLbl">Ø Sitzungen</div><div class="expHintVal">${avgLabel('sessions')}</div></div>
     </div>
+    ${ratingBlock}
     <div class="expHintNote">${noteText}</div>
   </div>`;
 }
@@ -1228,7 +1293,41 @@ function sessionHtml(i){
       <div class="field"><label>Intensität %</label><input data-session="${i}" data-key="intensity" value="${esc(s.intensity)}"></div>
       <div class="field"><label>Dauer min</label><input data-session="${i}" data-key="duration" value="${esc(s.duration)}"></div>
     </div>
-    <div class="field"><label>Anmerkung</label><textarea data-session="${i}" data-key="note">${esc(s.note)}</textarea></div>
+    ${sessionRatingHtml('session', i, s.rating)}
+    <div class="field"><label>Anmerkung</label><textarea data-session="${i}" data-key="note" enterkeyhint="done">${esc(s.note)}</textarea></div>
+  </div>`;
+}
+
+/* === Erfolgs-Bewertung pro Sitzung (1–5, bezogen auf das Hauptsymptom) ===
+   1 = unverändert / kein Effekt … 5 = sehr starke Besserung.
+   Diese Bewertung fließt in die Auswertung (Indikation → optimale
+   Frequenz/Intensität/Dauer) ein – siehe sessionRatingStats(). */
+const RATING_OPTIONS = [
+  {value:'1', label:'Keine Besserung', color:'#992020', soft:'#ecd6d6'},
+  {value:'2', label:'Wenig',           color:'#dc5959', soft:'#f8e1e1'},
+  {value:'3', label:'Mäßig',           color:'#e89c3c', soft:'#faeddb'},
+  {value:'4', label:'Deutlich',        color:'#7cc36e', soft:'#e7f4e4'},
+  {value:'5', label:'Sehr stark',      color:'#0d6b3c', soft:'#d3e4db'}
+];
+/* role: 'session' (data-session) oder 'msession' (data-msession) */
+function sessionRatingHtml(role, i, val){
+  const ms = mainSymptomOf(cur());
+  const cur_ = String(val || '');
+  const dataAttr = role === 'msession' ? `data-msession="${i}"` : `data-session="${i}"`;
+  const buttons = RATING_OPTIONS.map(o =>
+    `<label class="ratingOption" style="--col:${o.color};--soft:${o.soft}">
+       <input type="radio" name="${role}_${i}_rating" ${dataAttr} data-key="rating" value="${o.value}" ${cur_===o.value?'checked':''}>
+       <span class="rNum">${o.value}</span>
+       <span class="rLbl">${esc(o.label)}</span>
+     </label>`
+  ).join('');
+  const symLine = ms
+    ? `Erfolg bezogen auf das Hauptsymptom <b>„${esc(ms)}"</b>`
+    : `Erfolg dieser Sitzung`;
+  return `<div class="field ratingField">
+    <label>Bewertung des Sitzungserfolgs (1–5)</label>
+    <div class="ratingHint">${symLine} &nbsp;·&nbsp; 1 = keine Besserung … 5 = sehr starke Besserung</div>
+    <div class="ratingScale">${buttons}</div>
   </div>`;
 }
 
@@ -1251,7 +1350,8 @@ function maintenanceSessionHtml(i){
       <div class="field"><label>Intensität %</label><input data-msession="${i}" data-key="intensity" value="${esc(s.intensity)}"></div>
       <div class="field"><label>Dauer min</label><input data-msession="${i}" data-key="duration" value="${esc(s.duration)}"></div>
     </div>
-    <div class="field"><label>Anmerkung</label><textarea data-msession="${i}" data-key="note">${esc(s.note)}</textarea></div>
+    ${sessionRatingHtml('msession', i, s.rating)}
+    <div class="field"><label>Anmerkung</label><textarea data-msession="${i}" data-key="note" enterkeyhint="done">${esc(s.note)}</textarea></div>
   </div>`;
 }
 
@@ -1361,6 +1461,27 @@ function endResultScore(result){
   return map[result] ?? null;
 }
 
+/* Ermittelt das initiale Hauptsymptom eines Patienten.
+   Definition: die Beschwerde mit dem HÖCHSTEN Vor-Therapie-Wert (Evaluierung).
+   Fällt zurück auf die erste angekreuzte Beschwerde bzw. die erste in der Liste,
+   falls keine Vor-Werte vorhanden sind. Gibt null zurück, wenn gar nichts erfasst ist. */
+function mainSymptomOf(p){
+  const vals = p?.evaluierung?.values || {};
+  let best = null, bestV = -1;
+  symptoms.forEach(s => {
+    const raw = vals[s];
+    const num = (raw !== '' && raw !== undefined && raw !== null) ? Number(raw) : null;
+    if(num !== null && !isNaN(num) && num > bestV){ bestV = num; best = s; }
+  });
+  if(best) return best;
+  /* Kein numerischer Vor-Wert: erste erfasste Beschwerde (>0) oder erste der Liste */
+  const anyMarked = symptoms.find(s => {
+    const raw = vals[s];
+    return raw !== '' && raw !== undefined && raw !== null;
+  });
+  return anyMarked || symptoms[0] || null;
+}
+
 function patientImprovement(p){
   const pairs = [];
   symptoms.forEach(s => {
@@ -1445,6 +1566,7 @@ function buildAnalysisDataset(){
       const imp = patientImprovement(p);
       const ses = patientSessionStats(p);
       if(imp === null || ses === null) return null;
+      const rstats = sessionRatingStats(p);
       return {
         id: p.id,
         diagnoses: p.anamnese?.diagnoses || [],
@@ -1453,6 +1575,8 @@ function buildAnalysisDataset(){
         avgHz: ses.avgHz,
         avgIntensity: ses.avgIntensity,
         avgDuration: ses.avgDuration,
+        avgRating: rstats ? Math.round(rstats.mean * 10) / 10 : null,
+        ratedSessions: rstats ? rstats.n : 0,
         plannedTotal: Number(p.planung?.total) || 0,
         endResult: p.ende?.result || '',
         age: patientAge(p),
@@ -1463,6 +1587,70 @@ function buildAnalysisDataset(){
       };
     })
     .filter(Boolean);
+}
+
+/* === SITZUNGS-BEWERTUNGEN (1–5) → SESSION-LEVEL-DATENSATZ ===
+   Jede durchgeführte/erfasste Sitzung MIT einer Erfolgs-Bewertung (rating 1–5)
+   wird zu einem eigenen Datenpunkt: {diagnoses, hz, intensity, duration, rating}.
+   Damit lässt sich – auch schon vor der End-Evaluierung – die Frage
+   „welche Frequenz/Intensität/Dauer brachte den besten Sitzungserfolg?"
+   datenbasiert beantworten. */
+function buildSessionRatingDataset(){
+  const rows = [];
+  const firstNum = v => {
+    const str = String(v ?? '').trim();
+    if(str === '') return null;
+    const n = Number(str.split(/[\/+,\u2013-]/)[0]);
+    return isNaN(n) ? null : n;
+  };
+  db.patients.forEach(p => {
+    const diags = p.anamnese?.diagnoses || [];
+    const all = [...(p.planung?.sessions || []), ...((p.maintenance?.sessions) || [])];
+    all.forEach(s => {
+      const r = (s.rating !== '' && s.rating !== undefined && s.rating !== null) ? Number(s.rating) : null;
+      if(r === null || isNaN(r)) return;
+      rows.push({
+        diagnoses: diags,
+        hz:        firstNum(s.hz),
+        intensity: firstNum(s.intensity),
+        duration:  firstNum(s.duration),
+        rating:    r
+      });
+    });
+  });
+  return rows;
+}
+
+/* Mittlere Sitzungs-Bewertung eines Patienten (für Patienten-Statistik / Übersicht) */
+function sessionRatingStats(p){
+  const all = [...(p.planung?.sessions || []), ...((p.maintenance?.sessions) || [])];
+  const vals = all
+    .map(s => (s.rating !== '' && s.rating !== undefined && s.rating !== null) ? Number(s.rating) : null)
+    .filter(v => v !== null && !isNaN(v));
+  if(!vals.length) return null;
+  return {
+    n: vals.length,
+    mean: vals.reduce((a,b)=>a+b,0) / vals.length
+  };
+}
+
+/* Findet den Bin (Hz/Int/Dauer) mit der höchsten mittleren Sitzungs-Bewertung.
+   rows = Ausgabe von buildSessionRatingDataset (ggf. nach Diagnose gefiltert). */
+function bestBinByRating(rows, key, bins){
+  const grouped = {};
+  bins.forEach(b => grouped[b.label] = []);
+  rows.forEach(d => {
+    const v = d[key];
+    if(v === null || isNaN(v)) return;
+    const bin = bins.find(b => v >= b.min && v < b.max);
+    if(bin) grouped[bin.label].push(d.rating);
+  });
+  const cands = Object.entries(grouped)
+    .map(([label, rs]) => ({label, n: rs.length, meanRating: rs.length ? rs.reduce((a,b)=>a+b,0)/rs.length : null}))
+    .filter(x => x.n > 0);
+  if(!cands.length) return null;
+  cands.sort((a,b) => b.meanRating - a.meanRating);
+  return cands[0];
 }
 
 function diagnosisCounts(dataset){
@@ -1597,7 +1785,7 @@ function subgroupAnalysis(dataset){
 }
 
 function exportResearchCSV(dataset){
-  const headers = ['id_anon','diagnoses','age','ageGroup','gender','sessions','avgHz','avgIntensity','avgDuration','plannedTotal','endResult','improvementPercent'];
+  const headers = ['id_anon','diagnoses','age','ageGroup','gender','sessions','avgHz','avgIntensity','avgDuration','avgSessionRating','ratedSessions','plannedTotal','endResult','improvementPercent'];
   const rows = dataset.map((d, i) => [
     'P'+(i+1).toString().padStart(4,'0'),
     '"'+d.diagnoses.join('; ')+'"',
@@ -1608,6 +1796,8 @@ function exportResearchCSV(dataset){
     d.avgHz !== null ? d.avgHz.toFixed(1) : '',
     d.avgIntensity !== null ? d.avgIntensity.toFixed(1) : '',
     d.avgDuration !== null ? d.avgDuration.toFixed(1) : '',
+    d.avgRating !== null && d.avgRating !== undefined ? d.avgRating.toFixed(1) : '',
+    d.ratedSessions ?? 0,
     d.plannedTotal,
     '"'+d.endResult+'"',
     d.improvement
@@ -2499,7 +2689,7 @@ function renderPanels(){
 
       <div class="notice">
         <b>So funktioniert das Auto-Backup:</b><br>
-        Wenn aktiviert, wird nach <b>${Number(db.settings.autoBackupInterval)||3} Minuten Inaktivität</b> automatisch eine Sicherungsdatei geschrieben. Pro Tag eine Datei (<code>weberbrain_backup_${today()}.json</code>) – ältere Backups bleiben erhalten, der heutige Tag wird ggf. überschrieben.
+        Wenn aktiviert, wird nach <b>${Number(db.settings.autoBackupInterval)||3} Minuten Inaktivität</b> automatisch eine Sicherungsdatei mit Zeitstempel geschrieben (<code>weberbrain_backup_JJJJ-MM-TT_HH-MM-SS.json</code>). Im gewählten Ordner bleiben automatisch nur die <b>letzten ${MAX_BACKUPS} Speichersätze</b> erhalten – ältere werden gelöscht.
         <br><br>
         <b>Auf dem Tablet (Android-Chrome):</b> Eine direkte Ordner-Auswahl ist technisch nicht möglich. Die Datei landet immer im <i>Downloads</i>-Ordner. Beim ersten Mal fragt Chrome, ob mehrere Dateien heruntergeladen werden dürfen – das einmalig erlauben.
         <br><br>
@@ -2603,8 +2793,12 @@ function saveForm(){
   document.querySelectorAll('[data-session]').forEach(el => {
     const key = el.dataset.key;
     const idx = +el.dataset.session;
+    if(!p.planung.sessions[idx]) return;
     if(key === 'done'){
       p.planung.sessions[idx][key] = el.checked;
+    } else if(el.type === 'radio'){
+      /* Bewertungs-Radios: nur der angekreuzte schreibt seinen Wert */
+      if(el.checked) p.planung.sessions[idx][key] = el.value;
     } else {
       p.planung.sessions[idx][key] = el.value;
     }
@@ -2616,6 +2810,8 @@ function saveForm(){
     if(p.maintenance && p.maintenance.sessions[idx]){
       if(key === 'done'){
         p.maintenance.sessions[idx][key] = el.checked;
+      } else if(el.type === 'radio'){
+        if(el.checked) p.maintenance.sessions[idx][key] = el.value;
       } else {
         p.maintenance.sessions[idx][key] = el.value;
       }
@@ -2679,6 +2875,32 @@ function wireDynamic(){
         /* CSS :has(input:checked) Selector aktualisiert automatisch das Aussehen */
       }
       wasCheckedBeforeClick = false;
+    });
+  });
+
+  /* Re-Klick auf aktiven Bewertungs-Radio (Sitzungserfolg 1–5) = Abwahl */
+  document.querySelectorAll('.ratingScale .ratingOption').forEach(label => {
+    const radio = label.querySelector('input[type="radio"]');
+    if(!radio) return;
+    let wasChecked = false;
+    label.addEventListener('pointerdown', () => { wasChecked = radio.checked; });
+    label.addEventListener('click', e => {
+      if(wasChecked){
+        e.preventDefault();
+        radio.checked = false;
+        /* zugehörige Sitzung leeren */
+        const p = cur();
+        if(p){
+          if(radio.dataset.session !== undefined && p.planung?.sessions?.[+radio.dataset.session]){
+            p.planung.sessions[+radio.dataset.session].rating = '';
+          } else if(radio.dataset.msession !== undefined && p.maintenance?.sessions?.[+radio.dataset.msession]){
+            p.maintenance.sessions[+radio.dataset.msession].rating = '';
+          }
+          persist();
+        }
+        label.classList.remove('active');
+      }
+      wasChecked = false;
     });
   });
 
@@ -3352,6 +3574,14 @@ function makeReportHtml(anon){
     ${p.ende.result ? `<br><b>Frühere Therapeuten-Einschätzung:</b> ${esc(p.ende.result)}` : ''}
     </p>`;
 
+  /* Sitzungs-Erfolgsbewertungen (1–5) zusammenfassen */
+  const rstats = sessionRatingStats(p);
+  if(rstats){
+    const ms = mainSymptomOf(p);
+    html += `<p style="margin-top:-6px"><b>Ø Sitzungs-Erfolg:</b> ${rstats.mean.toFixed(1)} / 5 `
+      + `(${rstats.n} bewertete Sitzung${rstats.n!==1?'en':''}${ms?`, Hauptsymptom „${esc(ms)}"`:''})</p>`;
+  }
+
   html += '<table class="evalTable"><thead><tr><th>Parameter</th><th>Vor Therapie</th><th>Ende</th><th>Bewertung</th></tr></thead><tbody>';
   symptoms.forEach(s => {
     const pre = p.evaluierung.values?.[s] ?? '';
@@ -3848,10 +4078,29 @@ document.getElementById('search').oninput = renderList;
    - `visibilitychange` -> hidden: feuert beim Tab-Wechsel & App-Minimieren
    - periodischer Auto-Save alle 20s, falls der User auf einem Formular tippt
 */
-function safeSave(reason){
+/* Erkennt, ob gerade aktiv in ein Text-Eingabefeld getippt wird.
+   Solange das der Fall ist, darf der periodische Auto-Save NICHT blurren –
+   sonst schließt sich auf Mobilgeräten die virtuelle Tastatur mitten im Tippen. */
+function isTypingInTextField(){
+  const el = document.activeElement;
+  if(!el) return false;
+  const tag = el.tagName;
+  if(tag === 'TEXTAREA') return true;
+  if(tag === 'INPUT'){
+    const t = (el.type || 'text').toLowerCase();
+    /* Freitext-/Zahleneingaben: Tastatur ist offen. date/checkbox/radio nicht. */
+    return ['text','number','search','tel','email','url','password'].includes(t);
+  }
+  return false;
+}
+
+/* allowBlur=false → das aktive Feld wird NICHT geblurrt (Tastatur bleibt offen).
+   Wird vom periodischen Hintergrund-Save genutzt. */
+function safeSave(reason, allowBlur){
   try {
-    /* Aktives Eingabefeld zwingen, seinen Wert zu committen */
-    if(document.activeElement && typeof document.activeElement.blur === 'function'){
+    /* Aktives Eingabefeld nur dann zum Commit zwingen, wenn Blur erlaubt ist
+       (z.B. beim App-Wechsel / Schließen). Beim Hintergrund-Save nicht blurren. */
+    if(allowBlur !== false && document.activeElement && typeof document.activeElement.blur === 'function'){
       document.activeElement.blur();
     }
     saveForm();
@@ -3859,16 +4108,20 @@ function safeSave(reason){
     console.warn('[safeSave/'+(reason||'?')+'] Fehler:', e);
   }
 }
-window.addEventListener('beforeunload', () => safeSave('beforeunload'));
-window.addEventListener('pagehide',     () => safeSave('pagehide'));
+window.addEventListener('beforeunload', () => safeSave('beforeunload', true));
+window.addEventListener('pagehide',     () => safeSave('pagehide', true));
 document.addEventListener('visibilitychange', () => {
-  if(document.visibilityState === 'hidden') safeSave('visibilitychange');
+  if(document.visibilityState === 'hidden') safeSave('visibilitychange', true);
 });
-/* Periodischer Save als Sicherheitsnetz (alle 20s, nur wenn entsperrt) */
+/* Periodischer Save als Sicherheitsnetz (alle 20s, nur wenn entsperrt).
+   WICHTIG: Wenn der User gerade in einem Textfeld tippt, wird der Save
+   übersprungen – die Eingabe wird ohnehin beim nächsten 'change' oder beim
+   App-Wechsel gespeichert. So springt die Tastatur nicht mehr weg. */
 setInterval(() => {
   if(userMode === null) return;        /* gesperrt -> nichts zu speichern */
   if(!document.querySelector('[data-path],[data-array]')) return; /* kein Formular sichtbar */
-  safeSave('interval');
+  if(isTypingInTextField()) return;    /* aktiv am Tippen -> Tastatur nicht stören */
+  safeSave('interval', false);         /* ohne Blur speichern */
 }, 20000);
 
 /* Strg+S = Speichern */
@@ -3939,6 +4192,56 @@ if('serviceWorker' in navigator){
       }, 50);
     }
   };
+})();
+
+/* === TASTATUR-STEUERUNG: schwebender „Fertig"-Button =========================
+   Auf Mobilgeräten gibt es keine zuverlässige Möglichkeit, die virtuelle
+   Tastatur zu schließen, ohne irgendwo daneben zu tippen. Dieser Button
+   erscheint nur, solange ein Text-/Zahlenfeld aktiv ist, und schließt die
+   Tastatur kontrolliert (blur + Speichern). So bleibt die Tastatur beim
+   Tippen offen, lässt sich aber jederzeit bewusst ausblenden. */
+(function(){
+  let kbBtn = null;
+  function ensureBtn(){
+    if(kbBtn) return kbBtn;
+    kbBtn = document.createElement('button');
+    kbBtn.type = 'button';
+    kbBtn.id = 'kbDoneBtn';
+    kbBtn.textContent = '⌨️ Tastatur schließen';
+    kbBtn.setAttribute('aria-label', 'Tastatur schließen und speichern');
+    /* pointerdown statt click: feuert bevor das Feld den Fokus verliert,
+       sonst würde der Button beim Antippen schon wieder verschwinden */
+    kbBtn.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      const el = document.activeElement;
+      if(el && typeof el.blur === 'function') el.blur();
+      try { saveForm(); } catch(_){}
+      hideBtn();
+    });
+    document.body.appendChild(kbBtn);
+    return kbBtn;
+  }
+  function showBtn(){ ensureBtn().classList.add('visible'); }
+  function hideBtn(){ if(kbBtn) kbBtn.classList.remove('visible'); }
+
+  document.addEventListener('focusin', e => {
+    const t = e.target;
+    if(!t) return;
+    const tag = t.tagName;
+    const isText = tag === 'TEXTAREA' ||
+      (tag === 'INPUT' && ['text','number','search','tel','email','url','password'].includes((t.type||'text').toLowerCase()));
+    /* PIN-Pad / Lock-Overlay ausnehmen */
+    if(isText && !t.closest('#lockOverlay')) showBtn(); else hideBtn();
+  });
+  document.addEventListener('focusout', () => {
+    /* kurz verzögert prüfen, ob noch ein Textfeld aktiv ist (Feldwechsel) */
+    setTimeout(() => {
+      const el = document.activeElement;
+      const stillText = el && (el.tagName === 'TEXTAREA' ||
+        (el.tagName === 'INPUT' && ['text','number','search','tel','email','url','password'].includes((el.type||'text').toLowerCase())));
+      if(!stillText) hideBtn();
+    }, 50);
+  });
 })();
 
 /* === START: Protokolle laden, dann Lock anzeigen === */

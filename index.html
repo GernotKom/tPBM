@@ -233,6 +233,48 @@ textarea{min-height:90px;resize:vertical}
   }
 }
 
+/* === Sitzungserfolg-Bewertung (1–5) – kompakte Variante der Vergleichsskala === */
+.ratingField{margin-top:10px}
+.ratingHint{font-size:12px;color:#555;margin:-2px 0 4px;font-weight:600;text-transform:none;letter-spacing:0}
+.ratingScale{display:flex;flex-wrap:wrap;gap:6px}
+.ratingOption{
+  flex:1;min-width:64px;text-align:center;
+  border:2px solid var(--col);
+  border-radius:10px;padding:8px 4px;
+  background:var(--soft,#f0f0f0);
+  color:#222;cursor:pointer;
+  transition:transform .1s, box-shadow .15s, background .15s, color .15s;
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  position:relative;
+}
+.ratingOption input{position:absolute;opacity:0;pointer-events:none;width:0;height:0}
+.ratingOption .rNum{font-size:18px;font-weight:900;line-height:1}
+.ratingOption .rLbl{font-size:10px;font-weight:700;line-height:1.1}
+.ratingOption:hover{transform:translateY(-1px);filter:brightness(0.96)}
+.ratingOption:has(input:checked){
+  background:var(--col);
+  color:#fff;
+  border-width:4px;
+  padding:6px 2px;
+  box-shadow:0 4px 14px #00000033, 0 0 0 2px #fff inset;
+  transform:translateY(-1px);
+}
+@media print{
+  .ratingScale{break-inside:avoid}
+  .ratingOption{
+    border-color:var(--col)!important;background:var(--soft)!important;color:#222!important;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+  .ratingOption:has(input:checked){
+    background:var(--col)!important;color:#fff!important;border-width:4px!important;
+    -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  }
+}
+@media (min-width:900px){
+  .ratingOption .rNum{font-size:20px}
+  .ratingOption .rLbl{font-size:11px}
+}
+
 /* === Geschlechts-Auswahl (Anamnese) === */
 .genderScale{display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 16px}
 .genderOption{
@@ -741,6 +783,27 @@ canvas{width:100%;max-height:360px}
 .expHintLbl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#777;font-weight:700;margin-bottom:3px}
 .expHintVal{font-size:15px;font-weight:800;color:#555}
 .expHintNote{font-size:11px;color:#999;font-style:italic}
+.expHintRatingHead{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 6px;padding-top:8px;border-top:1px dashed #ccc;font-size:13px;color:#555}
+.expHintN{font-weight:600;color:#888;font-size:11px}
+
+/* === Schwebender „Tastatur schließen"-Button === */
+#kbDoneBtn{
+  position:fixed;
+  right:16px;
+  bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  z-index:9500;
+  display:none;
+  background:#007a53;color:#fff;
+  border:none;border-radius:999px;
+  padding:12px 18px;
+  font-size:14px;font-weight:800;
+  box-shadow:0 6px 20px #00000055;
+  cursor:pointer;
+  -webkit-tap-highlight-color:transparent;
+}
+#kbDoneBtn.visible{display:inline-flex;align-items:center;gap:6px}
+#kbDoneBtn:active{transform:translateY(1px)}
+@media print{#kbDoneBtn{display:none!important}}
 
 /* Best-Therapie-Finder */
 .r2-finder{background:linear-gradient(135deg,#f0f9f5 0%,#e8f4f0 100%);border:1px solid #9ccfa3;border-radius:16px;padding:16px}
