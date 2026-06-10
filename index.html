@@ -46,6 +46,33 @@ button:active{transform:scale(.98)}
 .tab{white-space:nowrap;background:var(--muted)}
 .tab.active{background:var(--brand);color:#fff}
 
+/* === Patientenrelevante Reiter farblich hervorheben ===
+   Die Reiter „Evaluierung vor Therapie" und „End-Evaluierung" enthalten die
+   vom Patienten direkt eingegebenen Beschwerde-Skalen. Sie werden in einem
+   warmen Lavendel-Ton hervorgehoben, damit Therapeut und Patient sofort
+   sehen, wo Patienten-Eingaben gemacht werden. */
+.tab[data-tab-id="evaluierung"],
+.tab[data-tab-id="ende"]{
+  background:linear-gradient(135deg,#e6dcf2,#d4c4eb);
+  border:2px solid #9374c4;
+  color:#3d2870;
+  font-weight:800;
+  position:relative;
+}
+.tab[data-tab-id="evaluierung"]::before,
+.tab[data-tab-id="ende"]::before{
+  content:"👤";
+  margin-right:4px;
+  font-size:0.95em;
+}
+.tab[data-tab-id="evaluierung"].active,
+.tab[data-tab-id="ende"].active{
+  background:linear-gradient(135deg,#7a5cb0,#5d3f93);
+  border-color:#3d2870;
+  color:#fff;
+  box-shadow:0 4px 12px #5d3f9344;
+}
+
 .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
 .field{display:flex;flex-direction:column;gap:6px;margin:8px 0}
@@ -407,6 +434,29 @@ canvas{width:100%;max-height:360px}
 .same{color:#6b7280;font-weight:900}
 .chartNote{font-size:14px;opacity:.85;margin:8px 0}
 .smallMuted{font-size:13px;opacity:.8}
+
+/* === Settings-Kartenblock für PDF-Export === */
+.settingsCard{
+  background:#f7f1ea;
+  border:1px solid #e0d4c8;
+  border-radius:10px;
+  padding:12px 14px;
+  margin:8px 0;
+}
+.settingsCardTitle{
+  font-weight:800;
+  color:#5d3a30;
+  font-size:14px;
+  margin-bottom:8px;
+}
+.settingsCardTitle .smallMuted{
+  font-weight:500;
+  color:#7a6657;
+}
+.settingsCard button:disabled{
+  opacity:0.5;
+  cursor:not-allowed;
+}
 
 /* === FORSCHUNGS-AUSWERTUNG === */
 .researchGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin:12px 0}

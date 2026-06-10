@@ -12,8 +12,8 @@ const KEY = 'weberbrain_clean_v4';
    Persist-Vorgang VOR dem aktuellen Stand geschrieben (also der vor-
    letzte gute Stand). */
 const KEY_SNAPSHOT = 'weberbrain_clean_v4_snapshot';
-const APP_VERSION = '1.26';
-const APP_RELEASE_DATE = '2026-05-28';
+const APP_VERSION = '1.28';
+const APP_RELEASE_DATE = '2026-06-08';
 
 /* ---------- Tabs (Therapeut sieht alle, Patient nur evaluierung+ende) ---------- */
 const TABS_ALL = [
@@ -636,11 +636,13 @@ async function doAutoBackup(){
    sauber getrennt. Bei jedem Aufruf wird der Ziel-Datenträger neu gewählt
    (Sicherheits-Vorgabe der File System Access API für USB-Sticks, die
    ohnehin nicht dauerhaft angesteckt sind).
-   Auf Tablet/Mobile (kein showDirectoryPicker) -> Hinweis + Download-Fallback. */
+   Auf Tablet/Mobile (kein showDirectoryPicker) -> Hinweis + Download-Fallback.
+   Anders als beim Auto-Backup werden hier KEINE alten Sicherungen gelöscht –
+   ein Archiv-USB-Stick soll alles behalten. */
 function backupMonthFolder(){
   const d = new Date();
   const p = n => String(n).padStart(2,'0');
-  return d.getFullYear()+'-'+p(d.getMonth()+1); /* z.B. 2026-05 */
+  return d.getFullYear()+'-'+p(d.getMonth()+1); /* z.B. 2026-06 */
 }
 
 async function exportToUsb(){
@@ -649,11 +651,11 @@ async function exportToUsb(){
   const monthDir = backupMonthFolder();
   const filename = 'weberbrain_kartei_' + backupTimestamp() + '.json';
 
-  /* Kein Ordner-Picker (Tablet/Mobile/iOS): Download-Fallback */
+  /* Kein Ordner-Picker (Tablet/Mobile/iOS): Download-Fallback mit Monat im Dateinamen */
   if(!isFolderPickerSupported()){
     const blob = new Blob([json], {type:'application/json'});
     dl(blob, 'weberbrain_kartei_' + monthDir + '_' + backupTimestamp() + '.json');
-    showToast('💾 Auf diesem Gerät ist keine USB-Ordnerwahl möglich – Datei wurde in „Downloads" gespeichert.');
+    showToast('💾 Auf diesem Gerät keine USB-Ordnerwahl – Datei in „Downloads" gespeichert.');
     return;
   }
 
@@ -816,7 +818,7 @@ function blankPatient(){
     /* beschwerden bleibt im Datenmodell fuer Rueckwaertskompatibilitaet, wird nicht angezeigt */
     beschwerden:{values:{},notes:''},
     evaluierung:{values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],notes:''},
-    planung:{start:today(),total:20,photos:[],photoNotes:'',supplements:[],suppNotes:'',sessions:makeSessions(20)},
+    planung:{start:today(),total:10,photos:[],photoNotes:'',supplements:[],suppNotes:'',sessions:makeSessions(10)},
     /* Erhaltungstherapie - nur wenn enabled=true wird das Sub-Panel gezeigt */
     maintenance:{enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''},
     ende:{values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],count:'',result:'',overallComparison:'',satisfaction:'',notes:''}
@@ -842,8 +844,8 @@ function ensureShape(){
   p.ende.mood = p.ende.mood || [];
   p.ende.vegetative = p.ende.vegetative || [];
   p.planung = p.planung || {};
-  /* Default 20 nur, wenn Feld komplett fehlt - sonst Wert beibehalten (auch leer/0) */
-  if(p.planung.total === undefined || p.planung.total === null) p.planung.total = 20;
+  /* Default 10 nur, wenn Feld komplett fehlt - sonst Wert beibehalten (auch leer/0) */
+  if(p.planung.total === undefined || p.planung.total === null) p.planung.total = 10;
   p.planung.sessions = p.planung.sessions || makeSessions(p.planung.total);
   /* Erhaltungstherapie nachruesten fuer alte Patienten */
   p.maintenance = p.maintenance || {enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''};
@@ -1043,11 +1045,14 @@ function render(){
   document.getElementById('printBtn').style.display = userMode === 'patient' ? 'none' : '';
   const settingsBtn2 = document.getElementById('settingsBtn');
   if(settingsBtn2) settingsBtn2.style.display = userMode === 'patient' ? 'none' : '';
-  /* Patientenname im Header anzeigen (nur Patientenmodus) */
+  /* Patientenname im Header anzeigen (immer wenn ein Patient gewählt ist –
+     früher nur im Patientenmodus). So weiß der Therapeut auf einen Blick,
+     bei welchem Patienten er sich gerade befindet. */
   const patNameEl = document.getElementById('patientNameDisplay');
   if(patNameEl){
-    if(userMode === 'patient' && cur() && cur().stamm?.name){
-      patNameEl.textContent = '👤 ' + cur().stamm.name;
+    const p = cur();
+    if(p && p.stamm?.name){
+      patNameEl.textContent = '👤 ' + p.stamm.name;
       patNameEl.style.display = '';
     } else {
       patNameEl.style.display = 'none';
@@ -1117,6 +1122,7 @@ function renderTabs(){
   tabList.forEach(([id,label]) => {
     const b = document.createElement('button');
     b.className = 'tab ' + (id === activeTab ? 'active' : '');
+    b.dataset.tabId = id;
     b.textContent = label;
     b.onclick = () => { autosaveAndToast(); activeTab = id; render(); };
     box.appendChild(b);
@@ -2715,7 +2721,26 @@ function renderPanels(){
       <p class="smallMuted" style="margin-top:6px">
         <b>🔌 USB-Sicherung:</b> Stick anstecken, Button drücken und den Stick als Ziel wählen.
         Die Datei wird automatisch in einem Monats-Unterordner (<code>${backupMonthFolder()}/</code>) abgelegt.
+        Auf Tablet/Mobile (ohne Ordnerwahl) erfolgt ein normaler Download mit Jahr-Monat im Dateinamen.
       </p>
+
+      <h3>📄 PDF-Berichte &amp; E-Mail-Versand</h3>
+      <p class="smallMuted" style="margin:-4px 0 8px">Die PDF-Berichte werden in einem neuen Druckfenster geöffnet. Im Druckdialog wählen Sie „<b>Als PDF speichern</b>" als Ziel. Auf Mobilgeräten erscheint die PDF-Option im System-Druckmenü.</p>
+      <div class="settingsCard">
+        <div class="settingsCardTitle">📋 Patientenübersicht <span class="smallMuted">(alle Patienten · Indikationen · Status)</span></div>
+        <div class="topBtns">
+          <button class="muted" id="pdfOverviewBtn">📄 PDF erstellen</button>
+          <button class="muted" id="emailOverviewBtn">📧 Per E-Mail versenden</button>
+        </div>
+      </div>
+      <div class="settingsCard">
+        <div class="settingsCardTitle">📅 Terminliste aktueller Patient <span class="smallMuted">(${cur() ? esc(cur().stamm?.name || 'Unbenannt') : '<i>kein Patient ausgewählt</i>'})</span></div>
+        <div class="topBtns">
+          <button class="muted" id="pdfApptsBtn" ${!cur()?'disabled':''}>📄 PDF erstellen</button>
+          <button class="muted" id="emailApptsBtn" ${!cur()?'disabled':''}>📧 Per E-Mail versenden</button>
+        </div>
+      </div>
+      <p class="smallMuted" style="margin-top:6px">ℹ️ E-Mail-Versand: Die PDF-Datei wird im Druckfenster erstellt und muss anschließend in der geöffneten Mail-App als Anhang hinzugefügt werden (technische Einschränkung von mailto-Links).</p>
 
       <h3>Auto-Backup</h3>
       <label class="toggleSwitch" style="margin:8px 0">
@@ -3165,8 +3190,19 @@ function wireDynamic(){
   const eb2 = document.getElementById('exportBtn2');
   if(eb2) eb2.onclick = exportJson;
 
+  /* USB-Stick-Sicherung in Monats-Unterordner */
   const usbBtn = document.getElementById('usbExportBtn');
   if(usbBtn) usbBtn.onclick = exportToUsb;
+
+  /* PDF- und E-Mail-Buttons */
+  const pdfOv = document.getElementById('pdfOverviewBtn');
+  if(pdfOv) pdfOv.onclick = exportPatientOverviewPDF;
+  const mailOv = document.getElementById('emailOverviewBtn');
+  if(mailOv) mailOv.onclick = emailPatientOverview;
+  const pdfAp = document.getElementById('pdfApptsBtn');
+  if(pdfAp) pdfAp.onclick = exportCurrentPatientAppointmentsPDF;
+  const mailAp = document.getElementById('emailApptsBtn');
+  if(mailAp) mailAp.onclick = emailCurrentPatientAppointments;
 
   /* Auto-Backup Toggle */
   const abt = document.getElementById('autoBackupToggle');
@@ -4037,6 +4073,297 @@ function dl(blob,name){
   a.click();
   URL.revokeObjectURL(a.href);
 }
+
+/* ============================================================
+   PDF-EXPORT via Druckfenster
+   ============================================================
+   Da die App offline-fähig sein soll und keine externen Libraries laden darf,
+   nutzen wir den Browser-eigenen Druckdialog: Ein neues Fenster mit dem
+   formatierten HTML wird geöffnet, window.print() automatisch aufgerufen,
+   und der Nutzer wählt im Druckdialog „Als PDF speichern" / „Save as PDF"
+   (Standard-Option in allen modernen Browsern, auch auf iOS/Android).
+   Vorteile: offline-fähig, keine Abhängigkeiten, plattformübergreifend. */
+function openPrintWindow(title, bodyHtml){
+  const w = window.open('', '_blank');
+  if(!w){
+    alert('Popup-Blocker verhindert das Öffnen des Druckfensters.\nBitte Popups für diese Seite erlauben.');
+    return null;
+  }
+  /* Brand-Farben + Logo aus Settings */
+  const logoSrc = db.settings.logo || (typeof DEFAULT_LOGO !== 'undefined' ? DEFAULT_LOGO : '');
+  const praxisName = esc(db.settings.praxisName || 'Praxis');
+  const praxisSub  = esc(db.settings.praxisSub || 'WeberBrain® Evaluation');
+  const praxisAddr = esc(db.settings.praxisAddress || '').replace(/\n/g,'<br>');
+  const praxisContact = esc(db.settings.praxisContact || '');
+  const dt = new Date().toLocaleString('de-DE');
+  w.document.open();
+  w.document.write(`<!doctype html><html lang="de"><head><meta charset="utf-8">
+    <title>${esc(title)}</title>
+    <style>
+      *{box-sizing:border-box}
+      body{font-family:'Segoe UI',Tahoma,sans-serif;color:#222;margin:0;padding:24px;background:#fafafa}
+      .pdfHead{display:flex;align-items:flex-start;gap:16px;border-bottom:2px solid #795044;padding-bottom:12px;margin-bottom:18px}
+      .pdfHead img{width:64px;height:64px;object-fit:contain;background:#fff;border-radius:8px;padding:4px;flex-shrink:0}
+      .pdfHeadText{flex:1;display:flex;flex-direction:column;gap:2px}
+      .pdfHeadText .name{font-size:18px;font-weight:800;color:#795044}
+      .pdfHeadText .sub{font-size:12px;opacity:.75}
+      .pdfHeadText .meta{font-size:11px;opacity:.75;margin-top:4px}
+      .pdfHeadDate{font-size:12px;opacity:.75;text-align:right}
+      h1{font-size:20px;color:#795044;margin:18px 0 6px}
+      h2{font-size:16px;color:#5d3a30;margin:18px 0 6px;border-bottom:1px solid #e0d4c8;padding-bottom:4px}
+      h3{font-size:13px;color:#444;margin:12px 0 4px}
+      table{width:100%;border-collapse:collapse;margin:8px 0 14px;font-size:12px;background:#fff;box-shadow:0 1px 3px #0001}
+      th,td{padding:6px 8px;text-align:left;border-bottom:1px solid #e8e0d7;vertical-align:top}
+      th{background:#f1e7dc;font-weight:700;color:#5d3a30;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+      tr:nth-child(even) td{background:#faf7f3}
+      .small{font-size:11px;color:#666}
+      .badge{display:inline-block;padding:2px 8px;border-radius:10px;background:#e8f0e0;color:#2e5a2c;font-size:11px;font-weight:700;margin-right:4px}
+      .badge.diag{background:#e0e8f5;color:#2c4a7a}
+      .badge.warn{background:#f8e1e1;color:#8b1f1f}
+      .footer{margin-top:24px;padding-top:8px;border-top:1px solid #ddd;font-size:10px;color:#888;text-align:center}
+      .rateBox{display:inline-block;padding:1px 6px;border-radius:6px;font-weight:800;color:#fff;font-size:11px}
+      .rate1{background:#992020}.rate2{background:#dc5959}.rate3{background:#e89c3c}.rate4{background:#7cc36e}.rate5{background:#0d6b3c}
+      .toolbar{position:fixed;top:8px;right:8px;display:flex;gap:6px;z-index:9999}
+      .toolbar button{padding:8px 14px;border:none;border-radius:6px;background:#795044;color:#fff;font-weight:700;cursor:pointer;box-shadow:0 2px 6px #0003;font-size:13px}
+      .toolbar button.close{background:#888}
+      .hint{background:#fff8e0;border-left:4px solid #d4a943;padding:8px 12px;font-size:12px;margin:10px 0;border-radius:4px}
+      @media print{
+        body{padding:0;background:#fff}
+        .toolbar,.hint{display:none}
+        h1,h2,h3{break-after:avoid}
+        table{break-inside:avoid;box-shadow:none}
+        tr{break-inside:avoid}
+        .pdfHead{break-after:avoid}
+      }
+    </style>
+    </head><body>
+    <div class="toolbar">
+      <button onclick="window.print()">📄 Als PDF speichern / Drucken</button>
+      <button class="close" onclick="window.close()">Schließen</button>
+    </div>
+    <div class="pdfHead">
+      ${logoSrc?`<img src="${logoSrc}" alt="Logo">`:''}
+      <div class="pdfHeadText">
+        <span class="name">${praxisName}</span>
+        <span class="sub">${praxisSub}</span>
+        ${praxisAddr?`<span class="meta">${praxisAddr}</span>`:''}
+        ${praxisContact?`<span class="meta">${praxisContact}</span>`:''}
+      </div>
+      <div class="pdfHeadDate">${esc(title)}<br>${esc(dt)}</div>
+    </div>
+    <div class="hint">💡 Klicken Sie oben rechts auf <b>„Als PDF speichern / Drucken"</b>. Im Druckdialog wählen Sie als Ziel <b>„Als PDF speichern"</b> (auf Mobilgeräten: „PDF" oder „In Datei drucken").</div>
+    ${bodyHtml}
+    <div class="footer">WeberBrain Evaluation · App v${esc(APP_VERSION)} · ${esc(dt)}</div>
+    <script>
+      /* Druckdialog automatisch öffnen, sobald Seite geladen ist */
+      window.addEventListener('load', () => { setTimeout(() => window.print(), 350); });
+    </script>
+    </body></html>`);
+  w.document.close();
+  return w;
+}
+
+/* Patientenübersicht als PDF: alle Patienten mit Diagnosen, Sitzungsanzahl
+   geplant/durchgeführt, Therapiebeginn, Status. Kompakte Tabelle. */
+function buildPatientOverviewHtml(){
+  if(!db.patients.length){
+    return '<div class="hint">Keine Patienten in der Kartei.</div>';
+  }
+  /* Sortiert nach Name (A–Z) */
+  const sorted = [...db.patients].sort((a,b) =>
+    String(a.stamm?.name||'').localeCompare(String(b.stamm?.name||''), 'de'));
+
+  let html = `<h1>📋 Patientenübersicht</h1>
+    <p class="small">Anzahl Patienten: <b>${sorted.length}</b></p>
+    <table>
+      <thead><tr>
+        <th>Nr.</th>
+        <th>Patient</th>
+        <th>Geburtsdatum</th>
+        <th>Diagnose(n) / Indikation</th>
+        <th>Beginn</th>
+        <th>Sitz.<br>geplant</th>
+        <th>Sitz.<br>durchgef.</th>
+        <th>Bewertung<br>Ø</th>
+        <th>Selbsteinschätzung</th>
+      </tr></thead><tbody>`;
+  sorted.forEach((p,i) => {
+    const name = esc(p.stamm?.name||'Unbenannt');
+    const birth = esc(p.stamm?.birth||'-');
+    const diags = (p.anamnese?.diagnoses||[]).map(d=>`<span class="badge diag">${esc(d)}</span>`).join(' ') || '<span class="small">–</span>';
+    const beginn = esc(p.planung?.start||'-');
+    const totalPlanned = esc(p.planung?.total||'?');
+    const doneCount = (p.planung?.sessions||[]).filter(s=>s.done).length;
+    const endCount = p.ende?.count ? esc(p.ende.count) : (doneCount || '–');
+    const rstats = sessionRatingStats(p);
+    const ratingStr = rstats ? `<b>${rstats.mean.toFixed(1)}</b>/5 <span class="small">(${rstats.n})</span>` : '<span class="small">–</span>';
+    const comp = p.ende?.overallComparison || '<span class="small">–</span>';
+    html += `<tr>
+      <td>${i+1}</td>
+      <td><b>${name}</b></td>
+      <td>${birth}</td>
+      <td>${diags}</td>
+      <td>${beginn}</td>
+      <td style="text-align:center">${totalPlanned}</td>
+      <td style="text-align:center">${endCount}</td>
+      <td style="text-align:center">${ratingStr}</td>
+      <td>${esc(comp)}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+
+  /* Diagnose-Auswertung: wie oft kommt welche Indikation vor? */
+  const diagCount = {};
+  sorted.forEach(p => (p.anamnese?.diagnoses||[]).forEach(d => diagCount[d]=(diagCount[d]||0)+1));
+  const diagEntries = Object.entries(diagCount).sort((a,b)=>b[1]-a[1]);
+  if(diagEntries.length){
+    html += `<h2>Indikationen-Verteilung</h2>
+      <table><thead><tr><th>Indikation</th><th style="text-align:right">Anzahl Patienten</th></tr></thead><tbody>`;
+    diagEntries.forEach(([d,n]) => {
+      html += `<tr><td>${esc(d)}</td><td style="text-align:right"><b>${n}</b></td></tr>`;
+    });
+    html += '</tbody></table>';
+  }
+  return html;
+}
+
+/* Einzel-Patient Termin-Liste als PDF: nur die einfache Liste der Sitzungen
+   (Akut + ggf. Erhaltung) mit Datum / Hz / Intensität / Dauer / Bewertung /
+   Anmerkung. Zusätzlich kurzer Kopfblock mit Patientenname und Diagnose. */
+function buildAppointmentsHtml(p){
+  const name = esc(p.stamm?.name||'Unbenannt');
+  const birth = esc(p.stamm?.birth||'-');
+  const diags = (p.anamnese?.diagnoses||[]).join(', ') || '–';
+  const beginn = esc(p.planung?.start||'-');
+  const totalPlanned = esc(p.planung?.total||'?');
+
+  let html = `<h1>📅 Terminliste – ${name}</h1>
+    <p class="small">
+      <b>Geburtsdatum:</b> ${birth} &nbsp;·&nbsp;
+      <b>Indikation:</b> ${esc(diags)} &nbsp;·&nbsp;
+      <b>Therapiebeginn:</b> ${beginn} &nbsp;·&nbsp;
+      <b>Geplant:</b> ${totalPlanned} Sitzungen
+    </p>`;
+
+  const rateBadge = r => {
+    if(r === '' || r === undefined || r === null) return '<span class="small">–</span>';
+    return `<span class="rateBox rate${esc(r)}">${esc(r)}/5</span>`;
+  };
+
+  const renderSessions = (arr, kind) => {
+    if(!arr.length) return '';
+    let s = `<h2>${kind === 'akut' ? 'Akut-Sitzungen' : 'Erhaltungs-Sitzungen'}</h2>
+      <table><thead><tr>
+        <th style="width:5%">Nr.</th>
+        <th style="width:14%">Datum</th>
+        <th style="width:9%">Hz</th>
+        <th style="width:9%">Int. %</th>
+        <th style="width:9%">Dauer</th>
+        <th style="width:8%">Status</th>
+        <th style="width:10%">Bewertung</th>
+        <th style="width:36%">Anmerkung</th>
+      </tr></thead><tbody>`;
+    arr.forEach((sess,i) => {
+      s += `<tr>
+        <td>${i+1}</td>
+        <td>${esc(sess.date||'–')}</td>
+        <td>${esc(sess.hz||'–')}</td>
+        <td>${esc(sess.intensity||'–')}</td>
+        <td>${esc(sess.duration||'–')}</td>
+        <td>${sess.done?'<span class="badge">✓ durchgef.</span>':'<span class="small">offen</span>'}</td>
+        <td>${rateBadge(sess.rating)}</td>
+        <td class="small">${esc(sess.note||'')}</td>
+      </tr>`;
+    });
+    s += '</tbody></table>';
+    return s;
+  };
+
+  html += renderSessions(p.planung?.sessions||[], 'akut');
+  if(p.maintenance?.enabled && (p.maintenance?.sessions||[]).length){
+    html += renderSessions(p.maintenance.sessions, 'maint');
+  }
+
+  /* Übersicht: durchgeführte vs. geplante Sitzungen, Ø Bewertung */
+  const done = (p.planung?.sessions||[]).filter(s=>s.done).length;
+  const rstats = sessionRatingStats(p);
+  html += `<h2>Zusammenfassung</h2>
+    <p>
+      <b>Durchgeführt:</b> ${done} von ${totalPlanned} geplanten Sitzungen<br>
+      ${rstats ? `<b>Ø Sitzungs-Bewertung:</b> ${rstats.mean.toFixed(1)} / 5 (${rstats.n} bewertete Sitzung${rstats.n!==1?'en':''})<br>` : ''}
+      ${p.ende?.overallComparison ? `<b>Patient-Selbsteinschätzung:</b> ${esc(p.ende.overallComparison)}<br>` : ''}
+      ${p.ende?.satisfaction ? `<b>Zufriedenheit:</b> ${esc(p.ende.satisfaction)}/10` : ''}
+    </p>`;
+  return html;
+}
+
+/* Öffnet die Patientenübersicht als druckbares PDF-Fenster */
+function exportPatientOverviewPDF(){
+  saveForm();
+  if(!db.patients.length){
+    alert('Keine Patienten in der Kartei.');
+    return;
+  }
+  openPrintWindow('Patientenübersicht · ' + today(), buildPatientOverviewHtml());
+}
+
+/* Öffnet die Terminliste des aktuellen Patienten als druckbares PDF-Fenster */
+function exportCurrentPatientAppointmentsPDF(){
+  saveForm();
+  const p = cur();
+  if(!p){ alert('Kein Patient ausgewählt.'); return; }
+  openPrintWindow('Terminliste – ' + (p.stamm?.name||'Patient'), buildAppointmentsHtml(p));
+}
+
+/* === E-Mail-Versand via mailto ============================================
+   Mailto-Links können prinzipbedingt KEINE Datei anhängen. Der Workflow:
+   1. PDF-Druckfenster wird parallel geöffnet (Nutzer speichert Datei lokal)
+   2. mailto wird ausgelöst mit hilfreichem Body, der das aktuelle Dateinamens-
+      Muster nennt und den Nutzer auffordert, das eben gespeicherte PDF als
+      Anhang hinzuzufügen.
+   So funktioniert es offline und auf jedem Gerät. */
+function sendByMailto(subject, body){
+  const url = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body);
+  /* Auf manchen Geräten muss mailto über location-Zuweisung statt window.open
+     aufgerufen werden, sonst startet die Mail-App nicht. */
+  try { window.location.href = url; }
+  catch(e){ window.open(url, '_blank'); }
+}
+
+function emailPatientOverview(){
+  saveForm();
+  if(!db.patients.length){ alert('Keine Patienten in der Kartei.'); return; }
+  /* Erst PDF-Druckfenster öffnen, damit User die Datei speichern kann */
+  exportPatientOverviewPDF();
+  /* Mailto leicht verzögert, damit das Druckfenster zuerst kommt */
+  setTimeout(() => {
+    const subject = 'WeberBrain – Patientenübersicht ' + today();
+    const body =
+      'Anbei sende ich Ihnen die aktuelle Patientenübersicht.\n\n' +
+      'Hinweis: Die PDF-Datei wurde soeben aus der WeberBrain-App erzeugt.\n' +
+      'Bitte fügen Sie die gespeicherte PDF-Datei (im Druckfenster auf „Als PDF speichern" klicken) als Anhang zu dieser E-Mail hinzu.\n\n' +
+      'Mit freundlichen Grüßen\n' + (db.settings.praxisName || '');
+    sendByMailto(subject, body);
+  }, 800);
+}
+
+function emailCurrentPatientAppointments(){
+  saveForm();
+  const p = cur();
+  if(!p){ alert('Kein Patient ausgewählt.'); return; }
+  exportCurrentPatientAppointmentsPDF();
+  setTimeout(() => {
+    const name = p.stamm?.name || 'Patient';
+    const subject = 'WeberBrain – Terminliste ' + name + ' (' + today() + ')';
+    const body =
+      'Anbei finden Sie die aktuelle Terminliste für ' + name + '.\n\n' +
+      'Hinweis: Die PDF-Datei wurde soeben aus der WeberBrain-App erzeugt.\n' +
+      'Bitte fügen Sie die gespeicherte PDF-Datei (im Druckfenster auf „Als PDF speichern" klicken) als Anhang zu dieser E-Mail hinzu.\n\n' +
+      'Mit freundlichen Grüßen\n' + (db.settings.praxisName || '');
+    sendByMailto(subject, body);
+  }, 800);
+}
+
 
 /* Patientenbericht drucken: wechselt temporaer auf Auswertung,
    schaltet Modus 'printing-patient' an (nur Bericht sichtbar),
