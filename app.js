@@ -818,7 +818,9 @@ function blankPatient(){
     /* beschwerden bleibt im Datenmodell fuer Rueckwaertskompatibilitaet, wird nicht angezeigt */
     beschwerden:{values:{},notes:''},
     evaluierung:{values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],notes:''},
-    planung:{start:today(),total:10,photos:[],photoNotes:'',supplements:[],suppNotes:'',sessions:makeSessions(10)},
+    /* start bewusst leer (kein Auto-Datum) - soll erst beim tatsächlichen Therapiebeginn
+       manuell eingetragen werden. total:10 = Standard-Basistherapie (Weber Stufenschema). */
+    planung:{start:'',total:10,photos:[],photoNotes:'',supplements:[],suppNotes:'',sessions:makeSessions(10)},
     /* Erhaltungstherapie - nur wenn enabled=true wird das Sub-Panel gezeigt */
     maintenance:{enabled:false,start:'',frequencyPerWeek:1,durationWeeks:12,sessions:[],notes:''},
     ende:{values:{},sleepDuration:'',sleepQuality:'',mood:[],vegetative:[],count:'',result:'',overallComparison:'',satisfaction:'',notes:''}
@@ -1100,13 +1102,38 @@ function render(){
   }
 }
 
+/* Sortierung der Patientenliste: wird in localStorage gemerkt, damit die
+   gewählte Reihenfolge (Name / Anlegedatum) über App-Neustarts erhalten bleibt. */
+const PATIENT_SORT_KEY = 'weberbrain_patientSort';
+function getPatientSort(){
+  try { return localStorage.getItem(PATIENT_SORT_KEY) || 'name-asc'; } catch(e){ return 'name-asc'; }
+}
+function setPatientSort(v){
+  try { localStorage.setItem(PATIENT_SORT_KEY, v); } catch(e){}
+}
+function sortPatients(list, mode){
+  const arr = [...list];
+  const byName = (a,b) => (a.stamm.name||'Unbenannter Patient').localeCompare(b.stamm.name||'Unbenannter Patient', 'de', {sensitivity:'base'});
+  const byCreated = (a,b) => new Date(a.created||0) - new Date(b.created||0);
+  switch(mode){
+    case 'name-desc':    return arr.sort((a,b) => byName(b,a));
+    case 'created-desc': return arr.sort((a,b) => byCreated(b,a));
+    case 'created-asc':  return arr.sort(byCreated);
+    case 'name-asc':
+    default:              return arr.sort(byName);
+  }
+}
 function renderList(){
   const q = document.getElementById('search').value.toLowerCase();
+  const sortSel = document.getElementById('patientSort');
+  const mode = getPatientSort();
+  if(sortSel) sortSel.value = mode;
   const box = document.getElementById('patientList');
   box.innerHTML = '';
-  db.patients
-    .filter(p => (p.stamm.name||'Unbenannt').toLowerCase().includes(q))
-    .forEach(p => {
+  sortPatients(
+    db.patients.filter(p => (p.stamm.name||'Unbenannt').toLowerCase().includes(q)),
+    mode
+  ).forEach(p => {
       const d = document.createElement('div');
       d.className = 'patientItem' + (p.id === currentId ? ' active' : '');
       d.innerHTML = '<b>'+esc(p.stamm.name||'Unbenannter Patient')+'</b><br><small>'+esc(p.stamm.birth||'')+' · '+esc(p.stamm.date||'')+'</small>';
@@ -1548,6 +1575,26 @@ function mainSymptomOf(p){
   return anyMarked || symptoms[0] || null;
 }
 
+/* Wandelt die mittlere Therapeuten-Erfolgsbewertung (1-5, pro Sitzung vergeben)
+   in einen 0-100%-Score um: 1 (keine Besserung) -> 0%, 5 (sehr stark) -> 100%.
+   Bewusst kein negativer Bereich, da die Skala selbst keine "Verschlechterung"
+   kennt (siehe RATING_OPTIONS) - konsistent mit symptomScore=0 bei "kein Effekt". */
+function therapistRatingScore(p){
+  const rstats = sessionRatingStats(p);
+  if(!rstats || rstats.n < 1) return null;
+  return Math.round(((rstats.mean - 1) / 4) * 100);
+}
+
+/* Gesamt-Verbesserungsscore eines Patienten.
+   Kombiniert bewusst DREI unabhängige Quellen, weil der reine Ankreuztest
+   (Beschwerden-Skalen vorher/nachher) bei manchen Patienten unverändert bleibt,
+   obwohl Antrieb, Schlaf, Kognition, Motorik oder Kopfschmerzfrequenz sich
+   spürbar gebessert haben - genau diese Fälle sollen hier sichtbar werden:
+     - symptomScore:    Beschwerden-Skalen vorher/nachher (Ankreuztest)      Gewicht 0.4
+     - subjectiveScore: Patienten-Gesamteinschätzung ("deutlich besser" etc.) Gewicht 0.3
+     - therapistScore:  Ø Therapeuten-Erfolgsbewertung je Sitzung (1-5)       Gewicht 0.3
+   Fehlt eine Quelle (z.B. Ankreuztest nicht ausgefüllt), wird über die
+   verbleibenden Quellen neu normiert - keine Quelle erzwingt einen Wert. */
 function patientImprovement(p){
   const pairs = [];
   symptoms.forEach(s => {
@@ -1568,10 +1615,15 @@ function patientImprovement(p){
   const compScore = comparisonScore(p.ende?.overallComparison);
   const oldResultScore = endResultScore(p.ende?.result);
   const subjectiveScore = compScore !== null ? compScore : oldResultScore;
-  if(symptomScore === null && subjectiveScore === null) return null;
-  if(symptomScore === null) return subjectiveScore;
-  if(subjectiveScore === null) return symptomScore;
-  return Math.round(symptomScore * 0.6 + subjectiveScore * 0.4);
+  const therapistScore = therapistRatingScore(p);
+
+  const comps = [];
+  if(symptomScore !== null)    comps.push({v: symptomScore,    w: 0.4});
+  if(subjectiveScore !== null) comps.push({v: subjectiveScore, w: 0.3});
+  if(therapistScore !== null)  comps.push({v: therapistScore,  w: 0.3});
+  if(!comps.length) return null;
+  const totalW = comps.reduce((a,c) => a + c.w, 0);
+  return Math.round(comps.reduce((a,c) => a + c.v * c.w, 0) / totalW);
 }
 
 /* Häufigster Wert (Modus) in einem Array von Zahlen */
@@ -1643,6 +1695,7 @@ function buildAnalysisDataset(){
         avgDuration: ses.avgDuration,
         avgRating: rstats ? Math.round(rstats.mean * 10) / 10 : null,
         ratedSessions: rstats ? rstats.n : 0,
+        therapistScore: therapistRatingScore(p),
         plannedTotal: Number(p.planung?.total) || 0,
         endResult: p.ende?.result || '',
         age: patientAge(p),
@@ -2066,7 +2119,16 @@ function renderResearchPanel(){
       <div class="r2-kpiLbl">Patienten</div>
       <div class="r2-kpiSub">in dieser Auswahl</div>
     </div>
+    <div class="r2-kpi">
+      ${(() => {
+        const rated = filtered.filter(d => d.avgRating !== null);
+        if(!rated.length) return `<div class="r2-kpiVal" style="color:#6b7280">–</div><div class="r2-kpiLbl">Ø Therapeutenbewertung</div><div class="r2-kpiSub">noch keine Bewertungen</div>`;
+        const m = rated.reduce((a,d)=>a+d.avgRating,0) / rated.length;
+        return `<div class="r2-kpiVal" style="color:#0d6b3c">${m.toFixed(1)} / 5</div><div class="r2-kpiLbl">Ø Therapeutenbewertung</div><div class="r2-kpiSub">${rated.length} von ${filtered.length} bewertet · fließt zu 30% in „Ø Verbesserung" ein</div>`;
+      })()}
+    </div>
   </div>
+  <p class="r2-sub" style="margin-top:-6px">Hinweis: „Ø Verbesserung" oben kombiniert Ankreuztest (40%), Patienten-Gesamteinschätzung (30%) und Ø Therapeutenbewertung je Sitzung (30%) – so werden auch Verläufe sichtbar, bei denen der Ankreuztest unverändert bleibt, obwohl sich Antrieb, Schlaf, Kognition, Motorik oder Kopfschmerzhäufigkeit gebessert haben.</p>
 
   ${filtered.length < 1 ? `<div class="r2-warn">⚠️ Keine Patienten entsprechen den Filterkriterien.</div>` : `
 
@@ -4462,6 +4524,7 @@ document.getElementById('nextBtn').onclick = () => {
   scrollTo({top:0, behavior:'smooth'});
 };
 document.getElementById('search').oninput = renderList;
+document.getElementById('patientSort').onchange = e => { setPatientSort(e.target.value); renderList(); };
 
 /* ============================================================
    ROBUSTE SPEICHERUNG: mehrere Save-Trigger

@@ -965,6 +965,15 @@ canvas{width:100%;max-height:360px}
   <aside class="sidebar" id="sidebar">
     <h2>Patientenkartei</h2>
     <div class="field"><input id="search" placeholder="Patient suchen…"></div>
+    <div class="field" style="margin-top:-6px">
+      <label style="font-size:12px">Sortierung</label>
+      <select id="patientSort">
+        <option value="name-asc">Name (A–Z)</option>
+        <option value="name-desc">Name (Z–A)</option>
+        <option value="created-desc">Anlegedatum (neueste zuerst)</option>
+        <option value="created-asc">Anlegedatum (älteste zuerst)</option>
+      </select>
+    </div>
     <div id="patientList" class="patientList"></div>
     <hr>
     <div class="sidebarBtns">
